@@ -98,9 +98,12 @@ def install():
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     args = [STATE["path"], "/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/NORESTART"]
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    from . import relaunch
     try:
-        subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags | 0x01000000, close_fds=True)  # + CREATE_BREAKAWAY_FROM_JOB
+        inst = subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags | 0x01000000, close_fds=True)  # + CREATE_BREAKAWAY_FROM_JOB
     except OSError:
-        subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags, close_fds=True)
-    threading.Thread(target=lambda: (time.sleep(1.5), os._exit(0)), daemon=True).start()
+        inst = subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags, close_fds=True)
+    # The installer no longer starts the app. A helper waits until the installer has finished and this process (and its WebView2 children) is gone,
+    # then opens the new version the same way a double-click would.
+    relaunch.spawn(relaunch.exe_path(), wait_pid=os.getpid(), kill_pid=os.getpid(), installer_pid=inst.pid)
     return {"ok": True}

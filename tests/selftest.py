@@ -462,5 +462,11 @@ from dt import updater as _u
 src = inspect.getsource(_u.install)
 check("updater strips PyInstaller env for the installer", "_PYI" in src and "PYINSTALLER_RESET_ENVIRONMENT" in src and "DETACHED_PROCESS" in src)
 
+from dt import relaunch as _rl
+_sc = _rl.script(r"C:\\Apps\\Demented Toolbox\\DementedToolbox.exe", 111, 111, 222)
+check("relaunch helper waits on exact pids and starts via explorer", '" 111 "' in _sc and '" 222 "' in _sc and "explorer.exe" in _sc and "taskkill /F /PID 111" in _sc and "/T" not in _sc.split("taskkill")[1].split("\n")[0])
+check("relaunch helper clears webview leftovers", "msedgewebview2.exe" in _sc and _sc.count(chr(34)) % 2 == 0)
+check("installer no longer relaunches silently (helper does)", "WizardSilent" not in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "installer.iss")).read())
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

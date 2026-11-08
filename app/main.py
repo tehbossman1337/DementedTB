@@ -76,6 +76,30 @@ def main():
         webbrowser.open(url)
         while True:
             time.sleep(3600)
+    from dt import relaunch
+    flag = os.path.join(config.DATA_DIR, "retry.flag")
+    retried = os.path.isfile(flag) and time.time() - os.path.getmtime(flag) < 180
+    _log(f"started pid={os.getpid()} port={port} frozen={getattr(sys, 'frozen', False)} retried={retried}")
+    relaunch.clear_orphans()
+
+    def watchdog():  # the window opened but never managed to talk to the server (seen right after an update): restart once, cleanly
+        time.sleep(25)
+        if server.UI["ok"]:
+            try:
+                os.remove(flag)
+            except OSError:
+                pass
+            return
+        _log("window never reached the local server within 25s")
+        if retried:
+            return
+        try:
+            open(flag, "w").write(str(time.time()))
+        except OSError:
+            pass
+        if relaunch.spawn(relaunch.exe_path(), wait_pid=os.getpid(), kill_pid=os.getpid()):
+            _log("restarting the app")
+    threading.Thread(target=watchdog, daemon=True).start()
     for attempt in (1, 2):  # right after an update the previous window may still be shutting down; one calm retry fixes that
         try:
             import webview

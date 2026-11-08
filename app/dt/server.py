@@ -829,6 +829,9 @@ def _(c, b):
 
 
 # ---------------------------------------------------------------- HTTP plumbing
+UI = {"ok": 0.0}  # when the window last got a complete answer from /api/shell (the watchdog in main.py uses it)
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 60
@@ -872,7 +875,10 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path not in OPEN and not lic.is_active(c):
                 return self.send({"error": "A valid license is required.", "locked": True}, 403)
-            return self.send(fn(c, arg(u)))
+            r = self.send(fn(c, arg(u)))
+            if u.path == "/api/shell":
+                UI["ok"] = time.time()
+            return r
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
             self.send({"error": str(e) if isinstance(e, ValueError) else f"{type(e).__name__}: {e}"}, 400)
         except (mail.MailError, discord.DiscordError, lic.LicenseError) as e:

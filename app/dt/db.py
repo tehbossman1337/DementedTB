@@ -146,3 +146,94 @@ def wipe_tables(c, tables):
 
 TRACKER_TABLES = ["orders", "order_items", "order_events", "processed", "attention", "notifications"]
 ARSENAL_TABLES = ["checkouts", "deleted_checkout_keys", "bots", "proxy_lists", "name_maps", "price_rules", "servers", "channels"]
+
+
+# ---------------------------------------------------------------- safety net: snapshots + automatic restore of an emptied database
+_DATA_TABLES = ("mail_accounts", "orders", "bots", "checkouts", "vprofiles", "vaccounts", "inv_items", "webhooks", "channels")
+
+
+def counts(path=None):
+    path = path or config.DB_PATH
+    out = {}
+    try:
+        c = sqlite3.connect(path, timeout=10)
+        for t in _DATA_TABLES:
+            try:
+                out[t] = c.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+            except sqlite3.Error:
+                out[t] = 0
+        c.close()
+    except sqlite3.Error:
+        pass
+    return out
+
+
+def has_data(path=None):
+    return any(counts(path).values())
+
+
+def _backup_dirs():
+    import os
+    dirs = [os.path.join(config.DATA_DIR, "backups")]
+    try:  # a second copy outside AppData survives anything that happens to that folder
+        dirs.append(os.path.join(config.exports_dir(), "auto-backups"))
+    except Exception:
+        pass
+    return dirs
+
+
+def snapshot(tag="auto"):
+    """Copy the live database (only if it holds data) into both backup folders; keep the newest few of each kind."""
+    import os
+    import time
+    if not os.path.isfile(config.DB_PATH) or not has_data():
+        return []
+    try:
+        c = connect()
+        c.execute("DELETE FROM settings WHERE key='user_wiped'"); c.commit(); c.close()
+    except sqlite3.Error:
+        pass
+    made = []
+    for d in _backup_dirs():
+        try:
+            os.makedirs(d, exist_ok=True)
+            dst = os.path.join(d, f"toolbox-{tag}-{time.strftime('%Y%m%d-%H%M%S')}.db")
+            src, out = sqlite3.connect(config.DB_PATH, timeout=30), sqlite3.connect(dst)
+            with out:
+                src.backup(out)
+            src.close(); out.close()
+            made.append(dst)
+            mine = sorted(f for f in os.listdir(d) if f.startswith(f"toolbox-{tag}-"))
+            for old in mine[:-4]:
+                os.remove(os.path.join(d, old))
+        except Exception:
+            pass
+    return made
+
+
+def restore_if_emptied():
+    """If the database holds no accounts/orders/bots at all but a snapshot does, and the user didn't wipe it on purpose, bring the snapshot back."""
+    import os
+    c = connect()
+    try:
+        if get(c, "user_wiped", ""):
+            return ""
+    finally:
+        c.close()
+    if has_data():
+        return ""
+    best = ""
+    for d in _backup_dirs():
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                p = os.path.join(d, f)
+                if f.endswith(".db") and has_data(p) and (not best or os.path.getmtime(p) > os.path.getmtime(best)):
+                    best = p
+    if not best:
+        return ""
+    src, dst = sqlite3.connect(best), sqlite3.connect(config.DB_PATH, timeout=30)
+    with dst:
+        src.backup(dst)
+    src.close(); dst.close()
+    _INIT.discard(config.DB_PATH)
+    return best

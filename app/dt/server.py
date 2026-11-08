@@ -536,6 +536,7 @@ def _(c, b):
     for k, v in keep.items():
         if v:
             db.put(c, k, v)
+    db.put(c, "user_wiped", db.now())  # tells the startup safety net this emptiness is on purpose
     return {"ok": True, "removed": n}
 
 

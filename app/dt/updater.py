@@ -92,6 +92,10 @@ def install():
     if os.name != "nt":
         return {"ok": False, "error": "Installing only works on Windows. The file is at " + STATE["path"]}
     STATE["phase"] = "installing"
+    try:
+        db.snapshot("pre-update")
+    except Exception:
+        pass
     # The installer (and the app it relaunches) must NOT inherit this process's PyInstaller environment: a relaunched copy that sees
     # these variables thinks it is a child of the old, now-replaced install and crashes on start. Hand it a clean environment instead.
     env = {k: v for k, v in os.environ.items() if not (k.startswith("_PYI") or k in ("_MEIPASS2", "PYTHONHOME", "PYTHONPATH", "TCL_LIBRARY", "TK_LIBRARY"))}

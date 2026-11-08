@@ -468,5 +468,18 @@ check("relaunch helper waits on exact pids and starts via explorer", '" 111 "' i
 check("relaunch helper clears webview leftovers", "msedgewebview2.exe" in _sc and _sc.count(chr(34)) % 2 == 0)
 check("installer no longer relaunches silently (helper does)", "WizardSilent" not in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "installer.iss")).read())
 
+# safety net: an emptied database comes back from a snapshot, unless the user wiped it on purpose
+from dt import db as _db, mail as _mail
+_cx = _db.connect()
+_mail.save_account(_cx, {"email": "keep@icloud.com", "password": "abcd-efgh-ijkl-mnop"})
+_snaps = _db.snapshot("selftest")
+check("snapshot written to both folders", len(_snaps) >= 1 and all(os.path.isfile(p) for p in _snaps))
+_db.wipe_tables(_cx, ["mail_accounts", "orders", "bots", "checkouts", "webhooks", "channels", "vprofiles", "vaccounts", "inv_items"])
+check("wiped db has no data", not _db.has_data())
+_back = _db.restore_if_emptied()
+check("emptied db restored from snapshot", bool(_back) and _db.counts()["mail_accounts"] >= 1)
+_cx = _db.connect(); _db.wipe_tables(_cx, ["mail_accounts", "orders", "bots", "checkouts", "webhooks", "channels", "vprofiles", "vaccounts", "inv_items"]); _db.put(_cx, "user_wiped", "x")
+check("deliberate wipe is respected", _db.restore_if_emptied() == "" and not _db.has_data())
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

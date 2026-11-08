@@ -61,6 +61,18 @@ def main():
         os._exit(check())
     _log("starting")
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
+    try:  # safety net: remember what is in the database, bring a snapshot back if it was emptied by accident
+        from dt import db as _db
+        _db.connect().close()
+        n0 = _db.counts()
+        _log(f"data folder {config.DATA_DIR}; accounts={n0.get('mail_accounts')} orders={n0.get('orders')} bots={n0.get('bots')} profiles={n0.get('vprofiles')}")
+        back = _db.restore_if_emptied()
+        if back:
+            _log("database was empty - restored from " + back)
+        else:
+            _db.snapshot("auto")
+    except Exception:
+        _log("safety net failed:\n" + traceback.format_exc())
     server.start_background()
     srv, port = server.make_server(8765)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

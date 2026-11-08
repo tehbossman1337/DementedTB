@@ -60,6 +60,21 @@ def main():
     if "--check" in sys.argv:
         os._exit(check())
     _log("starting")
+    try:  # native crashes (inside WebView2 / .NET) leave a trace here; pywebview's own messages go to app.log
+        import faulthandler
+        global _CRASH
+        _CRASH = open(os.path.join(config.DATA_DIR, "crash.log"), "a")
+        _CRASH.write(time.strftime("\n==== %Y-%m-%d %H:%M:%S start\n")); _CRASH.flush()
+        faulthandler.enable(_CRASH)
+    except Exception:
+        pass
+    try:
+        import logging
+        h = logging.FileHandler(os.path.join(config.DATA_DIR, "app.log"), encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+        lg = logging.getLogger("pywebview"); lg.addHandler(h); lg.setLevel(logging.INFO)
+    except Exception:
+        pass
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
     try:  # safety net: remember what is in the database, bring a snapshot back if it was emptied by accident
         from dt import db as _db
@@ -119,7 +134,14 @@ def main():
             w = webview.create_window(config.APP_NAME, url, width=1280, height=820, min_size=(980, 640), frameless=True, easy_drag=False,
                                       background_color="#0a0a0f", js_api=api)
             api.window = w
+            for ev in ("shown", "loaded", "closing", "closed"):
+                try:
+                    getattr(w.events, ev).__iadd__((lambda n: (lambda *a: _log("window " + n)))(ev))
+                except Exception:
+                    pass
+            _log(f"opening window (attempt {attempt}, webview {getattr(webview, '__version__', '?')}, gui {os.environ.get('PYWEBVIEW_GUI', 'auto')})")
             webview.start(storage_path=os.path.join(config.DATA_DIR, "webview"), private_mode=False)
+            _log("window loop ended")
             return
         except Exception:
             _log(f"native window failed (attempt {attempt}):\n" + traceback.format_exc())

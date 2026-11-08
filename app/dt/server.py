@@ -903,7 +903,7 @@ class H(BaseHTTPRequestHandler):
             if u.path not in OPEN and not lic.is_active(c):
                 return self.send({"error": "A valid license is required.", "locked": True}, 403)
             r = self.send(fn(c, arg(u)))
-            if u.path == "/api/shell":
+            if u.path in ("/api/shell", "/api/license/status"):
                 UI["ok"] = time.time()
             return r
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:

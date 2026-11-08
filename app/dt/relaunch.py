@@ -51,6 +51,11 @@ def spawn(exe, wait_pid=0, kill_pid=0, installer_pid=0):
             subprocess.Popen(["cmd.exe", "/c", p], env=env, cwd=tempfile.gettempdir(), creationflags=flags, close_fds=True)
         return True
     except Exception:
+        import time, traceback
+        try:
+            open(os.path.join(config.DATA_DIR, "app.log"), "a", encoding="utf-8").write(time.strftime("%Y-%m-%d %H:%M:%S ") + "relaunch helper failed:\n" + traceback.format_exc())
+        except Exception:
+            pass
         return False
 
 

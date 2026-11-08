@@ -19,6 +19,9 @@ function WaitUi($label, $notPid, $secs) {
 }
 function Dump {
   Get-Process | Where-Object { $_.Name -match "DementedToolbox|msedgewebview2|DementedToolbox-Setup" } | Format-Table Id, Name, StartTime -AutoSize | Out-String | Write-Host
+  if (Test-Path "$data\crash.log") { Copy-Item "$data\crash.log" $Out -Force; Write-Host "---- crash.log"; Get-Content "$data\crash.log" -Tail 60 }
+  Write-Host "---- Windows application errors"
+  try { Get-WinEvent -FilterHashtable @{ LogName = "Application"; Level = 2; StartTime = (Get-Date).AddMinutes(-15) } -MaxEvents 15 | ForEach-Object { "$($_.TimeCreated) $($_.ProviderName): $($_.Message -replace '\s+', ' ')" } | Write-Host } catch { Write-Host "(none)" }
   if (Test-Path "$data\app.log") { Copy-Item "$data\app.log" $Out -Force; Write-Host "---- app.log"; Get-Content "$data\app.log" -Tail 80 }
 }
 

@@ -906,11 +906,35 @@ class H(BaseHTTPRequestHandler):
             self._crash()
 
 
+class _Srv(ThreadingHTTPServer):
+    """On Windows SO_REUSEADDR lets two programs share one port, so right after an update the new app could attach to the port of the
+    dying old one and every request hung. Bind exclusively instead."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt":
+            import socket
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            except Exception:
+                pass
+        super().server_bind()
+
+
 def make_server(port=8765):
     db.connect().close()
-    for p in range(port, port + 20):
+    deadline = time.time() + 8  # the previous instance may still be closing: give it a few seconds to free the preferred port
+    while True:
         try:
-            return ThreadingHTTPServer(("127.0.0.1", p), H), p
+            return _Srv(("127.0.0.1", port), H), port
+        except OSError:
+            if time.time() > deadline:
+                break
+            time.sleep(0.4)
+    for p in range(port + 1, port + 30):
+        try:
+            return _Srv(("127.0.0.1", p), H), p
         except OSError:
             continue
     raise RuntimeError("No free port found")

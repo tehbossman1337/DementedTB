@@ -270,11 +270,11 @@ def _folders(M, acct):
 
 
 def _hdr_fetch(M, uids):
+    """Headers only, big batches. Returns {uid: message}."""
     out = {}
-    spec = "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID REPLY-TO TO)])"
-    for i in range(0, len(uids), 150):
-        batch = uids[i:i + 150]
-        typ, data = M.uid("FETCH", ",".join(batch), spec)
+    spec = "(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID REPLY-TO TO)])"
+    for i in range(0, len(uids), 400):
+        typ, data = M.uid("FETCH", ",".join(uids[i:i + 400]), spec)
         for item in data or []:
             if isinstance(item, tuple):
                 um = re.search(rb"UID (\d+)", item[0])
@@ -283,43 +283,73 @@ def _hdr_fetch(M, uids):
     return out
 
 
+def _bodies_fetch(M, uids):
+    """Full messages for the few candidates, many per round trip. Yields (uid, raw bytes)."""
+    for i in range(0, len(uids), 20):
+        typ, data = M.uid("FETCH", ",".join(uids[i:i + 20]), "(UID BODY.PEEK[])")
+        for item in data or []:
+            if isinstance(item, tuple):
+                um = re.search(rb"UID (\d+)", item[0])
+                if um:
+                    yield um.group(1).decode(), item[1]
+
+
 def _wm(c, aid, folder, validity):
     return f"wm:{aid}:{folder}:{validity}"
 
 
+def _msg_ts(h):
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(h.get("Date")).timestamp()
+    except Exception:
+        return 0
+
+
 def sync_account(aid, full=False, progress=lambda m: None, announce=True):
-    """Pull new mail for one account. full=True re-reads every folder from the beginning (Backfill)."""
+    """Pull new mail for one account. First run only looks back `sync_days` (default 180); Backfill (full=True) reads everything.
+    Headers are fetched in big batches, only mail that looks like an order is downloaded in full, and writes are batched."""
     stats = {"seen": 0, "orders": 0, "attention": 0, "errors": 0}
     c = db.connect()
     try:
         acct = get_account(c, aid)
         excs = db.rows(c, "SELECT * FROM exceptions")
         own = own_addresses(c)
+        try:
+            days = int(db.get(c, "sync_days", "180") or 180)
+        except ValueError:
+            days = 180
+        done = set(r[0] for r in c.execute("SELECT message_id FROM processed"))
     finally:
         c.close()
     M = None
     try:
         M = login(acct)
-        for folder in _folders(M, acct):
+        folders = sorted(_folders(M, acct), key=lambda f: 0 if f.upper() == "INBOX" else 1)
+        for folder in folders:
             try:
                 typ, _ = M.select('"' + folder.replace('"', '\\"') + '"', readonly=True)
                 if typ != "OK":
                     continue
                 vt = M.response("UIDVALIDITY")[1]
                 validity = (vt[0].decode() if vt and vt[0] else "0")
-                with DBLOCK:
-                    cc = db.connect()
-                    last = 0 if full else int(db.get(cc, _wm(cc, aid, folder, validity), "0") or 0)
-                    done = set() if full else set(r[0] for r in cc.execute("SELECT message_id FROM processed WHERE account=?", (acct["email"],)))
-                    cc.close()
-                typ, data = M.uid("SEARCH", None, f"UID {last + 1}:*" if last else "ALL")
+                cc = db.connect()
+                last = 0 if full else int(db.get(cc, _wm(cc, aid, folder, validity), "0") or 0)
+                cc.close()
+                if last:
+                    crit = f"UID {last + 1}:*"
+                elif not full and days > 0:
+                    crit = "SINCE " + time.strftime("%d-%b-%Y", time.gmtime(time.time() - days * 86400))
+                else:
+                    crit = "ALL"
+                typ, data = M.uid("SEARCH", None, crit)
                 uids = [u.decode() for u in (data[0] or b"").split()] if data and data[0] else []
                 uids = [u for u in uids if int(u) > last]
                 if not uids:
                     continue
                 progress(f"{acct['email']} · {folder}: {len(uids)} new")
                 headers = _hdr_fetch(M, uids)
-                cand = []
+                cand, skip = [], []
                 for u in uids:
                     h = headers.get(u)
                     if h is None:
@@ -327,39 +357,39 @@ def sync_account(aid, full=False, progress=lambda m: None, announce=True):
                     stats["seen"] += 1
                     sender, subject = _dec(h.get("From", "")), _dec(h.get("Subject", ""))
                     mid = (h.get("Message-ID") or f"{acct['email']}:{folder}:{validity}:{u}").strip()
-                    if mid in done:
+                    if mid in done and not full:
                         continue
                     if RETAIL_SENDER.search(sender + (h.get("Reply-To") or "")) or ORDER_WORDS.search(subject):
-                        cand.append((u, mid))
+                        cand.append((_msg_ts(h), u, mid))
                     else:
-                        with DBLOCK:
-                            cc = db.connect()
-                            cc.execute("INSERT OR IGNORE INTO processed VALUES(?,?,?,?,?)", (mid, acct["email"], "", "not an order", db.now()))
-                            cc.commit()
-                            cc.close()
-                for u, mid in cand:
+                        skip.append((mid, acct["email"], "", "not an order", db.now()))
+                        done.add(mid)
+                if skip:
                     with DBLOCK:
                         cc = db.connect()
-                        seen = cc.execute("SELECT 1 FROM processed WHERE message_id=?", (mid,)).fetchone()
+                        cc.executemany("INSERT OR IGNORE INTO processed VALUES(?,?,?,?,?)", skip)
+                        cc.commit()
                         cc.close()
-                    if seen and not full:
-                        continue
-                    typ, d2 = M.uid("FETCH", u, "(BODY.PEEK[])")
-                    raw = next((it[1] for it in d2 or [] if isinstance(it, tuple)), None)
-                    if not raw:
-                        continue
-                    msg = email.message_from_bytes(raw, policy=policy.default)
-                    with DBLOCK:
-                        cc = db.connect()
-                        try:
+                cand.sort()  # oldest first so placed -> shipped -> delivered arrive in order
+                by_uid = {u: mid for _, u, mid in cand}
+                order_uids = [u for _, u, _ in cand]
+                with DBLOCK:
+                    cc = db.connect()
+                    try:
+                        for u, raw in _bodies_fetch(M, order_uids):
+                            mid = by_uid.get(u)
+                            if not mid:
+                                continue
+                            msg = email.message_from_bytes(raw, policy=policy.default)
                             r = process_message(cc, mid, msg, acct["email"], excs, own, announce)
-                            cc.commit()
-                        finally:
-                            cc.close()
-                    if r == "order":
-                        stats["orders"] += 1
-                    elif r == "attention":
-                        stats["attention"] += 1
+                            done.add(mid)
+                            if r == "order":
+                                stats["orders"] += 1
+                            elif r == "attention":
+                                stats["attention"] += 1
+                        cc.commit()
+                    finally:
+                        cc.close()
                 with DBLOCK:
                     cc = db.connect()
                     db.put(cc, _wm(cc, aid, folder, validity), str(max(int(u) for u in uids)))
@@ -424,61 +454,87 @@ def sync_all(full=False, account_id=None, announce=True):
 
 
 # ------------------------------------------------------------------ live watcher
-def live_loop(interval=20):
-    """Keeps one connection per inbox and checks UIDNEXT every few seconds; new mail triggers an immediate sync."""
-    import os
-    if os.environ.get("DT_NO_AUTO"):
-        return
-    LIVE.update(running=True, since=time.time())
-    conns = {}
-    last_full = {}
-    while True:
+def _watch(aid, stop):
+    """One thread per inbox: keeps its own connection and checks UIDNEXT every few seconds; new mail syncs at once."""
+    M = None
+    last_full = 0
+    st = LIVE["accounts"].setdefault(aid, {"live": False, "uidnext": None})
+    while not stop.is_set():
         try:
             c = db.connect()
-            accts = [dict(r) for r in c.execute("SELECT * FROM mail_accounts WHERE enabled=1")]
+            r = c.execute("SELECT * FROM mail_accounts WHERE id=? AND enabled=1", (aid,)).fetchone()
             c.close()
-            for a in accts:
-                aid = a["id"]
-                st = LIVE["accounts"].setdefault(aid, {"live": False, "uidnext": None})
-                try:
-                    M = conns.get(aid)
-                    if M is None:
-                        M = conns[aid] = login(a)
-                    typ, data = M.status("INBOX", "(UIDNEXT)")
-                    nxt = re.search(rb"UIDNEXT (\d+)", data[0]).group(1) if data and data[0] else None
-                    st["live"] = True
-                    changed = st["uidnext"] is not None and nxt != st["uidnext"]
-                    st["uidnext"] = nxt
-                    due = time.time() - last_full.get(aid, 0) > 600
+            if not r:
+                break
+            a = dict(r)
+            try:
+                if M is None:
+                    M = login(a)
+                typ, data = M.status("INBOX", "(UIDNEXT)")
+                nxt = re.search(rb"UIDNEXT (\d+)", data[0]).group(1) if data and data[0] else None
+                st["live"] = True
+                changed = st["uidnext"] is not None and nxt != st["uidnext"]
+                st["uidnext"] = nxt
+                due = time.time() - last_full > 600
+                if (changed or due) and aid not in LIVE["syncing"] and not SYNC["running"]:
+                    last_full = time.time()
+                    LIVE["syncing"].add(aid)
+                    try:
+                        sync_account(aid)
+                    finally:
+                        LIVE["syncing"].discard(aid)
+                else:
                     c2 = db.connect()
                     c2.execute("UPDATE mail_accounts SET last_checked=?, last_error='' WHERE id=?", (db.now(), aid))
                     c2.commit()
                     c2.close()
-                    if (changed or due) and aid not in LIVE["syncing"] and not SYNC["running"]:
-                        last_full[aid] = time.time()
-                        LIVE["syncing"].add(aid)
-                        try:
-                            sync_account(aid)
-                        finally:
-                            LIVE["syncing"].discard(aid)
-                except (MailError, imaplib.IMAP4.error, OSError, AttributeError) as e:
-                    st["live"] = False
-                    try:
-                        conns.pop(aid).logout()
-                    except Exception:
-                        conns.pop(aid, None)
-                    c2 = db.connect()
-                    c2.execute("UPDATE mail_accounts SET last_error=?, last_checked=? WHERE id=?", (str(e)[:200], db.now(), aid))
-                    c2.commit()
-                    c2.close()
-            for gone in set(conns) - {a["id"] for a in accts}:
+            except (MailError, imaplib.IMAP4.error, OSError, AttributeError) as e:
+                st["live"] = False
                 try:
-                    conns.pop(gone).logout()
+                    M.logout()
                 except Exception:
                     pass
+                M = None
+                c2 = db.connect()
+                c2.execute("UPDATE mail_accounts SET last_error=?, last_checked=? WHERE id=?", (str(e)[:200], db.now(), aid))
+                c2.commit()
+                c2.close()
+                stop.wait(30)  # back off after a failure instead of hammering the server
+                continue
         except Exception:
             pass
-        time.sleep(interval)
+        stop.wait(LIVE.get("interval", 10))
+    if M:
+        try:
+            M.logout()
+        except Exception:
+            pass
+    LIVE["accounts"].pop(aid, None)
+
+
+def live_loop(interval=10):
+    """Supervisor: starts a watcher thread for every enabled account (and stops them when an account is removed or paused)."""
+    import os
+    if os.environ.get("DT_NO_AUTO"):
+        return
+    LIVE.update(running=True, since=time.time(), interval=interval)
+    threads = {}
+    while True:
+        try:
+            c = db.connect()
+            ids = {r["id"] for r in c.execute("SELECT id FROM mail_accounts WHERE enabled=1")}
+            c.close()
+            for aid in ids:
+                if aid not in threads or not threads[aid][0].is_alive():
+                    ev = threading.Event()
+                    t = threading.Thread(target=_watch, args=(aid, ev), daemon=True)
+                    threads[aid] = (t, ev)
+                    t.start()
+            for aid in set(threads) - ids:
+                threads.pop(aid)[1].set()
+        except Exception:
+            pass
+        time.sleep(3)
 
 
 def live_summary(c):

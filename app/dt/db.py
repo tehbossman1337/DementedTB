@@ -22,11 +22,13 @@ CREATE TABLE IF NOT EXISTS order_items(
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   name TEXT NOT NULL, qty INTEGER DEFAULT 1, unit_price REAL DEFAULT 0, sku TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS idx_oi ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_key ON orders(retailer, order_number);
 CREATE TABLE IF NOT EXISTS order_events(
   id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   ts TEXT, status TEXT, note TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS idx_oe ON order_events(order_id);
 CREATE TABLE IF NOT EXISTS processed(message_id TEXT PRIMARY KEY, account TEXT, retailer TEXT, outcome TEXT, ts TEXT);
+CREATE INDEX IF NOT EXISTS idx_processed_acct ON processed(account);
 CREATE TABLE IF NOT EXISTS attention(
   id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE, account TEXT, sender TEXT, subject TEXT, reason TEXT,
   snippet TEXT, guess TEXT DEFAULT '', created_at TEXT, resolved INTEGER DEFAULT 0);
@@ -76,6 +78,9 @@ def connect(path=None):
     c = sqlite3.connect(path, timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")
+    c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA temp_store=MEMORY")
+    c.execute("PRAGMA cache_size=-20000")
     if path not in _INIT:
         with _LOCK:
             if path not in _INIT:

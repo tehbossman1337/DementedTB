@@ -1,0 +1,6 @@
+# The app itself needs only the Python standard library plus 'cryptography' (license signatures, encrypted backups).
+cryptography>=42
+# Windows window + build:
+pywebview
+pythonnet
+pyinstaller

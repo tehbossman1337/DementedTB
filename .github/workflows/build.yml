@@ -1,0 +1,48 @@
+name: Build Windows installer
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: python -m pip install pyinstaller pywebview pythonnet cryptography
+      - name: Stamp build number, release feed and license server
+        shell: pwsh
+        env:
+          LICENSE_URL: ${{ vars.LICENSE_URL }}
+          LICENSE_PUBKEY: ${{ vars.LICENSE_PUBKEY }}
+        run: |
+          "BUILD = ${{ github.run_number }}`nREPO = `"${{ github.repository }}`"" | Set-Content -Encoding utf8 app/dt/build_info.py
+          if ($env:LICENSE_URL) { Set-Content -NoNewline -Encoding ascii app/dt/license_url.txt $env:LICENSE_URL.Trim() }
+          if ($env:LICENSE_PUBKEY) { Set-Content -NoNewline -Encoding ascii app/dt/license_pub.txt $env:LICENSE_PUBKEY.Trim() }
+      - name: Self-test
+        run: python tests/selftest.py
+      - name: Build app
+        shell: pwsh
+        run: |
+          $extra = @()
+          if (Test-Path app/dt/license_url.txt) { $extra += @("--add-data", "app/dt/license_url.txt;.") }
+          if (Test-Path app/dt/license_pub.txt) { $extra += @("--add-data", "app/dt/license_pub.txt;.") }
+          python -m PyInstaller --noconfirm --windowed --onedir --name DementedToolbox --icon app/app.ico --paths app --add-data "app/web;web" @extra --collect-all webview app/main.py
+      - name: Check the build produced the exe
+        run: if (!(Test-Path dist/DementedToolbox/DementedToolbox.exe)) { throw "exe missing" }
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build installer
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DementedToolbox-Setup
+          path: installer_out/DementedToolbox-Setup.exe
+      - name: Publish release (so the app can update itself)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "build-${{ github.run_number }}" installer_out/DementedToolbox-Setup.exe --title "Build ${{ github.run_number }}" --notes "Automatic build ${{ github.run_number }}" --latest

@@ -506,5 +506,9 @@ _o2.delete_orders(_c2, [_oid])
 check("deleting the order removes stock and its email receipt", _c2.execute("SELECT qty FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()["qty"] == 0)
 check("scan makes receipts for existing orders", _i2.scan_receipts(_c2) >= 0)
 
+import ast as _ast
+_mt = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "main.py")).read()
+check("js_api object exposes no public window attribute (pywebview would walk native objects)", "self.window" not in _mt and "api.window" not in _mt)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

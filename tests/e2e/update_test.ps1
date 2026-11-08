@@ -42,7 +42,7 @@ if (!$first) { Dump; throw "the app's window never reached its server on a norma
 
 Write-Host "== in-app update"
 Remove-Item Env:DT_E2E
-try { Invoke-RestMethod -Method Post -ContentType "application/json" -Body (@{ path = $Setup } | ConvertTo-Json) http://127.0.0.1:8765/api/update/e2e_install -TimeoutSec 10 | Out-Null } catch { Write-Host "install call: $_" }
+try { $r = Invoke-RestMethod -Method Post -ContentType "application/json" -Body (@{ path = $Setup } | ConvertTo-Json) http://127.0.0.1:8765/api/update/e2e_install -TimeoutSec 10; Write-Host "install call: $($r | ConvertTo-Json -Compress)" } catch { Write-Host "install call: $_" }
 $t0 = Get-Date
 for ($i = 0; $i -lt 6; $i++) { Start-Sleep 5; Shot ("2-during-update-{0:d2}" -f $i) }
 $after = WaitUi "relaunch after update" $first.pid 120
@@ -54,4 +54,5 @@ Dump
 if (!$after) { throw "after the in-app update the app did not come back with a working window" }
 if (!$d -or $d.pid -ne $after.pid) { throw "the relaunched app did not stay up (pid changed or gone): $($d | ConvertTo-Json -Compress)" }
 if ($d.data.mail_accounts -lt 1 -or $d.data.orders -lt 1) { throw "data was lost across the update: $($d.data | ConvertTo-Json -Compress)" }
+if ((Get-Content "$data\app.log" -Raw) -match "window.native") { throw "pywebview is walking native window objects (start-up stalls)" }
 Write-Host "UPDATE TEST PASSED"

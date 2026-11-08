@@ -18,23 +18,28 @@ def _log(msg):
 
 
 class WindowApi:
-    """Buttons of the custom title bar."""
+    """Buttons of the custom title bar.
+    The window is kept in a _private attribute on purpose: pywebview walks every public attribute of this object to expose it to JavaScript,
+    and walking window.native (the WebView2/.NET objects) from a background thread blocked the whole app at start-up (spinner, "not responding")."""
     def __init__(self):
-        self.window = None
+        self._window = None
+        self._max = False
 
     def minimize(self):
-        self.window.minimize()
+        self._window.minimize()
 
     def maximize(self):
         try:
-            self.window.toggle_fullscreen() if False else (self.window.restore() if getattr(self, "_max", False) else self.window.maximize())
-            self._max = not getattr(self, "_max", False)
+            self._window.restore() if self._max else self._window.maximize()
+            self._max = not self._max
         except Exception:
             pass
 
     def close(self):
-        self.window.destroy()
-        os._exit(0)
+        try:
+            self._window.destroy()
+        finally:
+            os._exit(0)
 
 
 def check():
@@ -110,14 +115,14 @@ def main():
     relaunch.clear_orphans()
 
     def watchdog():  # the window opened but never managed to talk to the server (seen right after an update): restart once, cleanly
-        time.sleep(25)
+        time.sleep(45)
         if server.UI["ok"]:
             try:
                 os.remove(flag)
             except OSError:
                 pass
             return
-        _log("window never reached the local server within 25s")
+        _log("window never reached the local server within 45s")
         if retried:
             return
         try:
@@ -133,7 +138,7 @@ def main():
             api = WindowApi()
             w = webview.create_window(config.APP_NAME, url, width=1280, height=820, min_size=(980, 640), frameless=True, easy_drag=False,
                                       background_color="#0a0a0f", js_api=api)
-            api.window = w
+            api._window = w
             for ev in ("shown", "loaded", "closing", "closed"):
                 try:
                     getattr(w.events, ev).__iadd__((lambda n: (lambda *a: _log("window " + n)))(ev))

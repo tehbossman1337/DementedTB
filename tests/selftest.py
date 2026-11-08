@@ -462,5 +462,18 @@ from dt import updater as _u
 src = inspect.getsource(_u.install)
 check("updater strips PyInstaller env for the installer", "_PYI" in src and "PYINSTALLER_RESET_ENVIRONMENT" in src and "DETACHED_PROCESS" in src)
 
+# virtual cards: encrypted at rest, masked in lists, parsed from pasted text
+from dt import vcc as VCC
+r = VCC.import_text(c, "378282246310005 09/28 1234\n4111 1111 1111 1111 exp 12/2027 CVV 321\n1234 5678 9012 3456 01/29 111")
+check("vcc import counts", r == {"added": 2, "skipped": 0, "invalid": 1}, r)
+check("vcc duplicate skipped", VCC.import_text(c, "4111111111111111 12/27 321")["skipped"] == 1)
+lst = VCC.list_cards(c)["cards"]
+check("vcc list is masked", all("4111111111111111" not in str(x) and "378282246310005" not in str(x) for x in lst) and {x["issuer"] for x in lst} == {"amex", "other"})
+raw = " ".join(str(x[0]) for x in c.execute("SELECT number FROM vcc_cards"))
+check("vcc stored encrypted", "4111" not in raw and "3782" not in raw)
+am = [x for x in lst if x["issuer"] == "amex"][0]
+check("vcc reveal", VCC.reveal(c, am["id"])["number"] == "378282246310005" and VCC.reveal(c, am["id"])["cvv"] == "1234")
+check("vcc rejects bad number", VCC.import_text(c, "1234 5678 9012 3456 01/29 111")["invalid"] == 1)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

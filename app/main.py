@@ -46,6 +46,9 @@ def check():
         assert inventory.lists(c)["pokemon_sets"], "inventory lists missing"
         inventory.dashboard(c)
         profiles.groups(c)
+        from dt import vcc
+        vcc.import_text(c, "4111111111111111 12/27 321")
+        assert vcc.reveal(c, 1)["cvv"] == "321", "vcc encryption failed"
         assert os.path.isfile(os.path.join(config.WEB_DIR, "index.html")), "web files missing"
         for f in ("core.js", "pages.js", "pages2.js", "pages3.js", "pages4.js", "boot.js", "app.css"):
             assert os.path.isfile(os.path.join(config.WEB_DIR, f)), f + " missing"

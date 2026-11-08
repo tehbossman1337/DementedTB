@@ -253,3 +253,76 @@ function acctModal(a, groups, cur, done) {
     }
   });
 }
+
+/* ---------- Virtual cards (Amex / Capital One): numbers stay masked until you reveal one */
+const VC = { issuer: '', q: '', sel: new Set() };
+const copyClear = async (t, what) => { try { await navigator.clipboard.writeText(t); toast(what + ' copied — clears from the clipboard in 30s'); setTimeout(async () => { try { if ((await navigator.clipboard.readText()) === t) await navigator.clipboard.writeText(' '); } catch (e) { } }, 30000); } catch (e) { toast('Copy isn\'t available here', true); } };
+PAGES.vcc = async function (v) {
+  const T = S.tok;
+  const d = await api('/api/vcc?issuer=' + encodeURIComponent(VC.issuer) + '&q=' + encodeURIComponent(VC.q));
+  if (T !== S.tok) return;
+  const tabs = [['', 'All'], ['amex', 'American Express'], ['capone', 'Capital One'], ['other', 'Other']];
+  const total = Object.values(d.counts).reduce((a, b) => a + b, 0);
+  VC.sel = new Set([...VC.sel].filter(i => d.cards.some(c => c.id === i)));
+  v.innerHTML = `<div class="page"><div class="ph"><div><h1>Virtual cards</h1><p>Your Amex and Capital One virtual cards in one place. Numbers are encrypted on this computer and stay hidden until you reveal one.</p></div>
+    <div class="acts"><button class="btn" id="v-imp">Import / paste</button><button class="btn p" id="v-add">Add card</button></div></div>
+    <div class="chips" id="v-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => `<button data-i="${k}" class="${VC.issuer === k ? 'on' : ''}">${l}${k ? ` · ${d.counts[k] || 0}` : ` · ${total}`}</button>`).join('')}</div>
+    <div class="filters"><input class="inp" id="v-q" style="max-width:340px" placeholder="Search label, merchant, last 4…" value="${esc(VC.q)}"></div>
+    <div id="v-bulk"></div><div id="v-list"></div></div>`;
+  $('#v-tabs').onclick = e => { const b = e.target.closest('[data-i]'); if (!b) return; VC.issuer = b.dataset.i; refreshPage(); };
+  let tm; $('#v-q').oninput = e => { VC.q = e.target.value; clearTimeout(tm); tm = setTimeout(() => { refreshPage(); setTimeout(() => { const el = $('#v-q'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 60); }, 250); };
+  $('#v-add').onclick = () => vccModal(null);
+  $('#v-imp').onclick = () => modal(`<h2>Import virtual cards</h2><p>Paste cards copied from your bank's site, one after another (number, expiry, CVV), or a CSV with a header row such as <span class="mono">Number,Expiry,CVV,Label,Merchant</span>. Nothing is sent anywhere — it's encrypted straight into this app.</p>
+    <div class="fld"><label class="f">Issuer</label><select class="sel" id="vi"><option value="">Detect automatically</option><option value="amex">American Express</option><option value="capone">Capital One</option></select></div>
+    ${fi('vm', 'Merchant (optional)', '', 'text', 'e.g. Pokémon Center')}
+    <textarea class="ta" id="vt" rows="8" placeholder="3782 822463 10005  09/28  1234&#10;4111 1111 1111 1111  12/27  321"></textarea>
+    <div class="mfoot"><button class="btn" data-close>Cancel</button><button class="btn p" id="vok">Import</button></div>`, {
+    onMount: m => $('#vok', m).onclick = async () => { const r = await act(() => api('/api/vcc/import', { text: $('#vt', m).value, issuer: $('#vi', m).value, merchant: $('#vm', m).value })); if (r) { closeModal(); toast(`Added ${r.added}${r.skipped ? `, skipped ${r.skipped} duplicate${r.skipped > 1 ? 's' : ''}` : ''}${r.invalid ? `, ${r.invalid} didn't look valid` : ''}`, !r.added && r.invalid); refreshPage(); } }
+  });
+  const bulk = () => {
+    const n = VC.sel.size, box = $('#v-bulk');
+    box.innerHTML = n ? `<div class="bulk"><b>${n} selected</b><button class="btn sm" data-b="used">Mark used</button><button class="btn sm" data-b="active">Mark active</button><button class="btn sm danger" data-b="del">Delete</button><button class="btn sm ghost" data-b="clr">Clear</button></div>` : '';
+    $$('[data-b]', box).forEach(b => b.onclick = async () => {
+      const ids = [...VC.sel], k = b.dataset.b;
+      if (k === 'clr') { VC.sel.clear(); refreshPage(); return; }
+      if (k === 'del') { if (!await confirmBox(`Delete ${ids.length} card${ids.length > 1 ? 's' : ''}?`, 'They are removed from this app only — the cards still exist at your bank.', 'Delete', true)) return; await act(() => api('/api/vcc/delete', { ids }), 'Deleted'); }
+      else await act(() => api('/api/vcc/status', { ids, status: k }), 'Updated');
+      VC.sel.clear(); refreshPage();
+    });
+  };
+  const L = $('#v-list'), byId = Object.fromEntries(d.cards.map(c => [c.id, c]));
+  if (!d.cards.length) L.innerHTML = `<div class="empty"><b>${total ? 'Nothing matches' : 'No virtual cards yet'}</b>${total ? '' : 'Add one, or paste the cards you\'ve already made at American Express or Capital One.'}</div>`;
+  else {
+    L.innerHTML = `<div class="card"><div class="tbl-wrap"><table class="t"><thead><tr><th style="width:34px"><input type="checkbox" class="ck" id="v-all"></th><th>Card</th><th>Issuer</th><th>Label / merchant</th><th>Expires</th><th>Limit</th><th>Status</th><th></th></tr></thead><tbody>
+      ${d.cards.map(c => `<tr data-id="${c.id}"><td><input type="checkbox" class="ck" ${VC.sel.has(c.id) ? 'checked' : ''}></td><td class="mono">${c.masked}</td><td>${esc(c.issuer_label)}</td><td>${esc(c.label || '—')}${c.merchant ? `<div class="note">${esc(c.merchant)}</div>` : ''}</td><td>${esc(c.exp || '—')}</td><td>${c.limit ? money(c.limit) : '—'}</td>
+      <td><span class="pill ${c.status === 'active' ? 'delivered' : c.status === 'used' ? 'shipped' : 'cancelled'}"><i></i>${c.status[0].toUpperCase() + c.status.slice(1)}</span></td>
+      <td style="white-space:nowrap"><button class="btn sm" data-rev="${c.id}">Reveal</button> <button class="btn sm ghost" data-ed="${c.id}">Edit</button></td></tr>`).join('')}</tbody></table></div></div>`;
+    $('#v-all', L).onclick = e => { d.cards.forEach(c => e.target.checked ? VC.sel.add(c.id) : VC.sel.delete(c.id)); $$('tbody .ck', L).forEach(x => x.checked = e.target.checked); bulk(); };
+    L.onclick = async e => {
+      const ck = e.target.closest('.ck'), rv = e.target.closest('[data-rev]'), ed = e.target.closest('[data-ed]');
+      if (ck && ck.id !== 'v-all') { const id = +ck.closest('tr').dataset.id; ck.checked ? VC.sel.add(id) : VC.sel.delete(id); bulk(); }
+      if (rv) { const c = byId[rv.dataset.rev], r = await act(() => api('/api/vcc/reveal', { id: c.id })); if (!r) return; let tmo;
+        const fmt = n => n.replace(/(\d{4})(?=\d)/g, '$1 ');
+        modal(`<h2>${esc(c.issuer_label)} ·· ${c.last4}</h2><p>Hides itself in 30 seconds.</p>
+          ${[['Number', fmt(r.number), 'n'], ['Expires', r.exp || '—', 'e'], ['CVV', r.cvv || '—', 'c']].map(([l, val, k]) => `<div class="fld"><label class="f">${l}</label><div style="display:flex;gap:8px"><input class="inp mono" readonly value="${esc(val)}"><button class="btn sm" data-cp="${k}">Copy</button></div></div>`).join('')}
+          <div class="mfoot"><button class="btn" data-close>Close</button></div>`, { onClose: () => clearTimeout(tmo), onMount: m => { tmo = setTimeout(closeModal, 30000); m.onclick = ev => { const b = ev.target.closest('[data-cp]'); if (b) copyClear({ n: r.number, e: r.exp, c: r.cvv }[b.dataset.cp], { n: 'Number', e: 'Expiry', c: 'CVV' }[b.dataset.cp]); }; } }); }
+      if (ed) vccModal(byId[ed.dataset.ed]);
+    };
+  }
+  bulk();
+};
+function vccModal(c) {
+  modal(`<h2>${c ? 'Edit card' : 'Add virtual card'}</h2>
+    <div class="fld"><label class="f">Issuer</label><select class="sel" id="vci">${[['amex', 'American Express'], ['capone', 'Capital One'], ['other', 'Other']].map(([k, l]) => `<option value="${k}" ${c && c.issuer === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${fi('vcn', 'Card number', '', 'text', c ? '•••• ' + c.last4 + ' (leave empty to keep)' : '')}${fi('vce', 'Expiry (MM/YY)', c ? c.exp : '')}${fi('vcv', 'CVV', '', 'text', c ? 'leave empty to keep' : '')}
+    ${fi('vcl', 'Label', c ? c.label : '')}${fi('vcm', 'Merchant', c ? c.merchant : '')}${fi('vcq', 'Limit (optional)', c && c.limit ? c.limit : '')}
+    <div class="fld"><label class="f">Status</label><select class="sel" id="vcs">${['active', 'used', 'closed'].map(s => `<option ${c && c.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+    <div class="note hidden" id="vcerr" style="color:var(--red)"></div>
+    <div class="mfoot">${c ? '<button class="btn danger" id="vcd" style="margin-right:auto">Delete</button>' : ''}<button class="btn" data-close>Cancel</button><button class="btn p" id="vcok">Save</button></div>`, {
+    onMount: m => {
+      const num = $('#vcn', m); num.oninput = () => { const d = num.value.replace(/\D/g, ''); if (!c && /^3[47]/.test(d)) $('#vci', m).value = 'amex'; };
+      $('#vcok', m).onclick = async () => { try { await api('/api/vcc/save', { id: c && c.id, card: { issuer: $('#vci', m).value, number: num.value, exp: $('#vce', m).value, cvv: $('#vcv', m).value, label: $('#vcl', m).value, merchant: $('#vcm', m).value, limit: $('#vcq', m).value, status: $('#vcs', m).value } }); closeModal(); toast('Saved'); refreshPage(); } catch (x) { $('#vcerr', m).textContent = x.message; $('#vcerr', m).classList.remove('hidden'); } };
+      if (c) $('#vcd', m).onclick = async () => { if (await confirmBox('Delete this card?', 'It is removed from this app only.', 'Delete', true)) { await act(() => api('/api/vcc/delete', { ids: [c.id] }), 'Deleted'); closeModal(); refreshPage(); } };
+    }
+  });
+}

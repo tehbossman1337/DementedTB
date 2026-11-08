@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import (vcc, arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
+from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
 OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
@@ -689,38 +689,6 @@ def _(c, q):
 @get("/api/inv/scans")
 def _(c, q):
     return {"scans": inventory.list_scans(c), "team": inventory.team(c)}
-
-
-@get("/api/vcc")
-def _(c, q):
-    return vcc.list_cards(c, (q.get("issuer") or [""])[0], (q.get("q") or [""])[0])
-
-
-@post("/api/vcc/save")
-def _(c, b):
-    return {"ok": True, "id": vcc.save(c, b.get("card") or {}, int(b["id"]) if b.get("id") else None)}
-
-
-@post("/api/vcc/reveal")
-def _(c, b):
-    return vcc.reveal(c, int(b["id"]))
-
-
-@post("/api/vcc/delete")
-def _(c, b):
-    vcc.delete(c, b.get("ids") or [])
-    return {"ok": True}
-
-
-@post("/api/vcc/status")
-def _(c, b):
-    vcc.set_status(c, b.get("ids") or [], b.get("status"))
-    return {"ok": True}
-
-
-@post("/api/vcc/import")
-def _(c, b):
-    return vcc.import_text(c, b.get("text") or "", b.get("issuer") or "", b.get("merchant") or "")
 
 
 @post("/api/inv/items/save")

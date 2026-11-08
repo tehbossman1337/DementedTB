@@ -676,6 +676,17 @@ def _(c, q):
     return {"receipts": inventory.list_receipts(c), "lists": inventory.lists(c)}
 
 
+@post("/api/inv/receipts/scan")
+def _(c, b):
+    """Make receipts from every tracked order, and (unless asked not to) start a mail scan so newly found confirmation emails turn into receipts too."""
+    made = inventory.scan_receipts(c)
+    syncing = False
+    if b.get("sync", True) and not mail.SYNC["running"] and c.execute("SELECT 1 FROM mail_accounts WHERE enabled=1").fetchone():
+        threading.Thread(target=mail.sync_all, kwargs={"full": bool(b.get("full"))}, daemon=True).start()
+        syncing = True
+    return {"ok": True, "made": made, "syncing": syncing}
+
+
 @get("/api/inv/tax")
 def _(c, q):
     y = int((q.get("year") or [0])[0] or 0) or inventory.settings(c)["tax_year"] or __import__("datetime").date.today().year

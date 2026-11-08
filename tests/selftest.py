@@ -481,5 +481,30 @@ check("emptied db restored from snapshot", bool(_back) and _db.counts()["mail_ac
 _cx = _db.connect(); _db.wipe_tables(_cx, ["mail_accounts", "orders", "bots", "checkouts", "webhooks", "channels", "vprofiles", "vaccounts", "inv_items"]); _db.put(_cx, "user_wiped", "x")
 check("deliberate wipe is respected", _db.restore_if_emptied() == "" and not _db.has_data())
 
+from dt import db as _d2, orders as _o2, inventory as _i2
+_c2 = _d2.connect()
+_ev = {"retailer": "Target", "order_number": "STK-1", "status": "placed", "date": "2026-10-20", "total": 40.0, "items": [{"name": "Stock Test Booster Bundle", "qty": 4, "price": 10}], "tracking": ""}
+_o2.apply_event(_c2, _ev, account="a@b.c", announce=False)
+_oid = _c2.execute("SELECT id FROM orders WHERE order_number='STK-1'").fetchone()["id"]
+_rc = _c2.execute("SELECT * FROM inv_receipts WHERE order_id=?", (_oid,)).fetchone()
+check("confirmation email makes an info receipt", _rc and _rc["source"] == "email" and _rc["amount"] == 40.0 and _rc["vendor"] == "Target")
+check("placed order adds no stock", not _c2.execute("SELECT 1 FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone())
+_o2.apply_event(_c2, dict(_ev, status="delivered"), account="a@b.c", announce=False)
+_it = _c2.execute("SELECT * FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()
+check("delivered adds stock", _it and _it["qty"] == 4)
+_o2.set_status(_c2, [_oid], "shipped")
+check("leaving delivered takes the stock back", _c2.execute("SELECT qty FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()["qty"] == 0)
+_o2.set_status(_c2, [_oid], "delivered")
+check("delivered again re-adds once", _c2.execute("SELECT qty FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()["qty"] == 4)
+_o2.set_status(_c2, [_oid], "delivered")
+check("no double add", _c2.execute("SELECT qty FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()["qty"] == 4)
+_before = _i2.dashboard(_c2)["expenses"]
+check("email receipts are not counted as expenses", _before == _i2.dashboard(_c2)["expenses"] and all(r["source"] == "email" for r in _i2.list_receipts(_c2) if r["order_id"] == _oid))
+_i2.save_receipt(_c2, {"date": "2026-10-20", "vendor": "Target", "amount": 40}, _rc["id"])
+check("editing a receipt makes it a counted one", _c2.execute("SELECT source FROM inv_receipts WHERE id=?", (_rc["id"],)).fetchone()["source"] == "manual")
+_o2.delete_orders(_c2, [_oid])
+check("deleting the order removes stock and its email receipt", _c2.execute("SELECT qty FROM inv_items WHERE name='Stock Test Booster Bundle'").fetchone()["qty"] == 0)
+check("scan makes receipts for existing orders", _i2.scan_receipts(_c2) >= 0)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

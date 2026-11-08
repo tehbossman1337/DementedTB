@@ -105,6 +105,11 @@ def connect(path=None):
             if path not in _INIT:
                 c.execute("PRAGMA journal_mode=WAL")
                 c.executescript(SCHEMA)
+                for tbl, col in (("inv_receipts", "order_id INTEGER"), ("inv_receipts", "source TEXT DEFAULT 'manual'"), ("inv_order_links", "lines TEXT DEFAULT ''")):
+                    try:
+                        c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
+                    except sqlite3.OperationalError:
+                        pass  # already there
                 c.commit()
                 _INIT.add(path)
     return c

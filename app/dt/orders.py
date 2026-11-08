@@ -202,12 +202,24 @@ def save_manual(c, d, oid=None):
 
 
 def _to_inventory(c, oid):
+    """Keep Inventory in step with the tracker: delivered adds stock, leaving Delivered takes it back; every confirmed order gets an info receipt."""
     try:
-        if c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"] == "delivered":
-            from . import inventory
+        from . import inventory
+        row = c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()
+        if not row:
+            return
+        if row["status"] == "delivered":
             inventory.on_delivered(c, oid)
+        else:
+            inventory.on_undelivered(c, oid)
+        inventory.receipt_from_order(c, oid)
     except Exception:
-        pass
+        import os, time, traceback
+        from . import config
+        try:
+            open(os.path.join(config.DATA_DIR, "app.log"), "a", encoding="utf-8").write(time.strftime("%Y-%m-%d %H:%M:%S ") + "inventory hook failed:\n" + traceback.format_exc() + "\n")
+        except Exception:
+            pass
 
 
 def set_status(c, ids, status):
@@ -226,6 +238,12 @@ def delete_orders(c, ids):
     for i in ids:
         o = c.execute("SELECT * FROM orders WHERE id=?", (i,)).fetchone()
         if o:
+            try:
+                from . import inventory
+                inventory.on_undelivered(c, i)
+                inventory.receipt_from_order(c, i, drop=True)
+            except Exception:
+                pass
             c.execute("INSERT OR REPLACE INTO deleted_orders(retailer,order_number,product,total,deleted_at) VALUES(?,?,?,?,?)",
                       (o["retailer"], o["order_number"], o["product"], o["total"], db.now()))
             c.execute("UPDATE checkouts SET link_order_id=NULL, match_status='unmatched' WHERE link_order_id=?", (i,))

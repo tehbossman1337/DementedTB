@@ -12,7 +12,7 @@ from . import db, notify
 
 from .inv_data import DATA
 CATEGORIES = ["Pokemon Card", "Graphics Card"]
-DEFAULTS = {"partner1": "Me", "partner2": "Partner", "aging_days": 90, "drop_pct": 0.15, "monthly_target": 0.0, "big_sale": 0.0, "auto_from_orders": 1, "tax_year": 0}
+DEFAULTS = {"partner1": "Me", "partner2": "Partner", "aging_days": 90, "drop_pct": 0.15, "monthly_target": 0.0, "big_sale": 0.0, "auto_from_orders": 1, "auto_receipts": 1, "tax_year": 0}
 GPU_WORDS = re.compile(r"\b(rtx|gtx|radeon|geforce|gpu|graphics card|video card|nvidia)\b", re.I)
 SKU_RE = re.compile(r"^[A-Z]{2,4}-\d{1,6}$")
 LOCK = threading.RLock()  # anything that picks a new SKU runs under this so two requests can't take the same one
@@ -390,7 +390,7 @@ def save_receipt(c, d, rid=None):
     vals = (dt, str(d.get("vendor") or "").strip(), str(d.get("category") or "").strip(), str(d.get("description") or "").strip(), sku, num(d.get("amount")),
             str(d.get("method") or "").strip(), str(d.get("ref") or "").strip(), str(d.get("notes") or "").strip())
     if rid:
-        c.execute(f"UPDATE inv_receipts SET {','.join(k + '=?' for k in cols.split(','))} WHERE id=?", vals + (rid,))
+        c.execute(f"UPDATE inv_receipts SET {','.join(k + '=?' for k in cols.split(','))}, source='manual' WHERE id=?", vals + (rid,))
     else:
         c.execute(f"INSERT INTO inv_receipts({cols}) VALUES({','.join('?' * 9)})", vals)
     c.commit()
@@ -414,7 +414,7 @@ def dashboard(c):
     s = settings(c)
     sales = list_sales(c)
     items = list_items(c, sales)
-    exp = sum(r[0] for r in c.execute("SELECT amount FROM inv_receipts"))
+    exp = sum(r[0] for r in c.execute("SELECT amount FROM inv_receipts WHERE COALESCE(source,'manual')<>'email'"))
     rev, fees = sum(x["sale_price"] for x in sales), sum(x["total_fees"] or 0 for x in sales)
     prof, basis = sum(x["profit"] or 0 for x in sales), sum(x["cost_basis"] or 0 for x in sales)
     sold_units = sum(x["qty_sold"] for x in items)
@@ -463,7 +463,7 @@ def tax_summary(c, year):
     allsales = list_sales(c)
     sales = [x for x in allsales if (x["sale_date"] or "").startswith(str(year))]
     rcs = list_receipts(c)
-    exp = sum(r["amount"] for r in rcs if (r["date"] or "").startswith(str(year)))
+    exp = sum(r["amount"] for r in rcs if (r["date"] or "").startswith(str(year)) and (r.get("source") or "manual") != "email")
     gross, cogs = sum(x["sale_price"] for x in sales), sum(x["cost_basis"] or 0 for x in sales)
     fees, ship = sum(x["total_fees"] or 0 for x in sales), sum(x["ship_cost"] for x in sales)
     years = sorted({int(x["sale_date"][:4]) for x in allsales if x["sale_date"]} | {int(r["date"][:4]) for r in rcs if r["date"]} | {date.today().year}, reverse=True)
@@ -534,10 +534,11 @@ def on_delivered(c, oid):
     lines = [(i["name"], int(i["qty"] or 1), float(i["unit_price"] or 0)) for i in c.execute("SELECT * FROM order_items WHERE order_id=?", (oid,))] or \
             [(o["product"] or f"{o['retailer']} order {o['order_number']}", int(o["qty"] or 1), round((o["total"] or 0) / max(1, int(o["qty"] or 1)), 2))]
     last = None
+    added = []
     for name, qty, unit in lines:
         name = (name or "").strip() or f"{o['retailer']} item"
         cat = infer_category(name)
-        ex = c.execute("SELECT * FROM inv_items WHERE lower(name)=lower(?) AND category=?", (name, cat)).fetchone()
+        ex = c.execute("SELECT * FROM inv_items WHERE lower(name)=lower(?) AND category=?", (name, cat)).fetchone() or _find_similar(c, name, cat)
         if ex:
             nq = ex["qty"] + qty
             price = round((ex["qty"] * ex["purchase_price"] + qty * unit) / nq, 4) if nq else unit
@@ -547,9 +548,76 @@ def on_delivered(c, oid):
             last = next_sku(c, cat)
             c.execute("INSERT INTO inv_items(sku,category,name,qty,purchase_date,purchase_price,purchase_source,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                       (last, cat, name[:200], qty, (o["order_date"] or today())[:10], unit, o["retailer"], f"From order {o['order_number']}", now(), now()))
-    c.execute("INSERT OR REPLACE INTO inv_order_links VALUES(?,?)", (oid, last))
+        added.append([last, qty])
+    c.execute("INSERT OR REPLACE INTO inv_order_links(order_id, sku, lines) VALUES(?,?,?)", (oid, last, json.dumps(added)))
     c.commit()
     return last
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower().replace("pokémon", "pokemon"))
+
+
+def _find_similar(c, name, cat):
+    n = _norm(name)
+    for r in c.execute("SELECT * FROM inv_items WHERE category=?", (cat,)):
+        if _norm(r["name"]) == n:
+            return r
+    return None
+
+
+def on_undelivered(c, oid):
+    """The order stopped being Delivered (status changed by hand, cancelled/refunded, or deleted): take back what was added to stock."""
+    link = c.execute("SELECT * FROM inv_order_links WHERE order_id=?", (oid,)).fetchone()
+    if not link:
+        return False
+    try:
+        lines = json.loads(link["lines"] or "[]")
+    except ValueError:
+        lines = []
+    for sku, qty in lines:
+        it = c.execute("SELECT qty FROM inv_items WHERE sku=?", (sku,)).fetchone()
+        if it:
+            c.execute("UPDATE inv_items SET qty=?, updated_at=? WHERE sku=?", (max(0, it["qty"] - int(qty)), now(), sku))
+    c.execute("DELETE FROM inv_order_links WHERE order_id=?", (oid,))
+    c.commit()
+    return True
+
+
+# ------------------------------------------------------------------ purchase-confirmation receipts (from the tracker / scanned emails)
+def receipt_from_order(c, oid, drop=False):
+    """One info receipt per order, made from its confirmation email. Not counted as an expense (the cost is already in the item's purchase price);
+    editing it by hand turns it into a normal, counted receipt."""
+    ex = c.execute("SELECT * FROM inv_receipts WHERE order_id=?", (oid,)).fetchone()
+    o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if drop or not o or o["status"] in ("cancelled", "refunded"):
+        if ex and (ex["source"] or "") == "email":
+            c.execute("DELETE FROM inv_receipts WHERE id=?", (ex["id"],))
+            c.commit()
+        return False
+    if not settings(c).get("auto_receipts", 1):
+        return False
+    desc = (o["product"] or "").strip() or f"Order {o['order_number']}"
+    note = f"From your confirmation email{' (' + o['account'] + ')' if o['account'] else ''}"
+    if ex:
+        if (ex["source"] or "") == "email":
+            c.execute("UPDATE inv_receipts SET date=?, vendor=?, description=?, amount=? WHERE id=?",
+                      ((o["order_date"] or today())[:10], o["retailer"], desc[:200], float(o["total"] or 0), ex["id"]))
+            c.commit()
+        return False
+    c.execute("INSERT INTO inv_receipts(date,vendor,category,description,sku,amount,method,ref,notes,order_id,source) VALUES(?,?,?,?,?,?,?,?,?,?,'email')",
+              ((o["order_date"] or today())[:10], o["retailer"], "Inventory Purchase", desc[:200], "", float(o["total"] or 0), "", o["order_number"], note, oid))
+    c.commit()
+    return True
+
+
+def scan_receipts(c):
+    """Make receipts for every tracked order that doesn't have one yet."""
+    n = 0
+    for r in c.execute("SELECT id FROM orders").fetchall():
+        if receipt_from_order(c, r["id"]):
+            n += 1
+    return n
 
 
 # ------------------------------------------------------------------ csv

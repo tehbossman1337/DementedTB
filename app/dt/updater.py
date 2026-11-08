@@ -42,7 +42,7 @@ def check(token=""):
         rel = json.load(_open(f"{API}/repos/{repo()}/releases/latest", token))
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return {"ok": False, "error": "No release found yet. If the repository is private, add a GitHub token in Settings → Updates."}
+            return {"ok": False, "error": "No release found yet. If the repository is private, add a GitHub token (paste a read-only token and check again)."}
         if e.code in (401, 403):
             return {"ok": False, "error": "GitHub refused the request. Check the token (it needs read access to the repository)."}
         return {"ok": False, "error": f"GitHub said {e.code}"}
@@ -92,6 +92,15 @@ def install():
     if os.name != "nt":
         return {"ok": False, "error": "Installing only works on Windows. The file is at " + STATE["path"]}
     STATE["phase"] = "installing"
-    subprocess.Popen([STATE["path"], "/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/NORESTART"])
-    threading.Thread(target=lambda: (time.sleep(2), os._exit(0)), daemon=True).start()
+    # The installer (and the app it relaunches) must NOT inherit this process's PyInstaller environment: a relaunched copy that sees
+    # these variables thinks it is a child of the old, now-replaced install and crashes on start. Hand it a clean environment instead.
+    env = {k: v for k, v in os.environ.items() if not (k.startswith("_PYI") or k in ("_MEIPASS2", "PYTHONHOME", "PYTHONPATH", "TCL_LIBRARY", "TK_LIBRARY"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    args = [STATE["path"], "/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/NORESTART"]
+    flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags | 0x01000000, close_fds=True)  # + CREATE_BREAKAWAY_FROM_JOB
+    except OSError:
+        subprocess.Popen(args, env=env, cwd=tempfile.gettempdir(), creationflags=flags, close_fds=True)
+    threading.Thread(target=lambda: (time.sleep(1.5), os._exit(0)), daemon=True).start()
     return {"ok": True}

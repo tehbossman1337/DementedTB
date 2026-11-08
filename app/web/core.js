@@ -21,6 +21,9 @@ const IC = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.7"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
   min: '<path d="M5 12h14"/>', max: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
   dots: '<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>',
+  user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.6-3.8 3.7-6 7.5-6s6.9 2.200 7.500 6"/>',
+  card: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M7 15h4"/>',
+  key: '<circle cx="8" cy="15" r="3.5"/><path d="M10.500 12.500L19 4M16 7l2.500 2.500M13.500 9.500L15.500 11.500"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
 };
 const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${IC[n] || ''}</svg>`;
@@ -89,18 +92,18 @@ const S = { route: 'tracking', info: null, page: null, shell: null, tok: 0 };
 const NAV = [
   { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
   { id: 'arsenal', label: 'Arsenal', icon: 'target', items: [['checkouts', 'Checkouts', 'doc'], ['servers', 'Servers & channels', 'discord'], ['bots', 'Bots & proxies', 'layers'], ['rules', 'Price rules', 'doc']] },
+  { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Site accounts', 'key']] },
 ];
 const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
-  checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], settings: ['Demented Toolbox', 'Settings'] };
+  checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], profiles: ['Profiles & Accounts', 'Profiles'], siteaccts: ['Profiles & Accounts', 'Site accounts'], settings: ['Demented Toolbox', 'Settings'] };
 
 function renderShell() {
-  const open = store.get('groups', { tracker: true, arsenal: true });
+  const open = store.get('groups', { tracker: true, arsenal: true, vault: true });
   $('#side').innerHTML = `
     <div class="brand"><div class="logo">${LOGO}</div><div><b>Demented Toolbox</b><span>v${esc(S.info.version)}</span></div></div>
     <div class="sec">MODULES</div>
     ${NAV.map(g => `<button class="grp ${open[g.id] ? '' : 'closed'}" data-grp="${g.id}">${icon(g.icon)}<span>${g.label}</span><span class="car">▼</span></button>
       <div class="sub ${open[g.id] ? '' : 'closed'}" id="sub-${g.id}">${g.items.map(([id, l, ic]) => `<button class="nav" data-nav="${id}">${icon(ic, 18)}<span>${l}</span><span class="side-ind" id="ind-${id}"></span></button>`).join('')}</div>`).join('')}
-    <div class="soon"><span>More modules</span><span class="chip-soon">Coming soon</span></div>
     <div class="sec">APP</div>
     <button class="grp" data-nav="settings" style="font-weight:500">${icon('gear')}<span>Settings</span></button>
     <div class="me">
@@ -131,6 +134,7 @@ function renderRoute() {
   $('#crumb').innerHTML = `<b>${esc(a)}</b><i>/</i>${esc(b)}`;
   $$('[data-nav]').forEach(n => n.classList.toggle('on', n.dataset.nav === S.route));
   const fn = PAGES[S.route]; const v = $('#view'); v.scrollTop = 0;
+  if (S.page !== S.route && typeof vstate !== 'undefined') vstate.q = '';
   S.page = S.route; S.tok++; fn(v);
 }
 const PAGES = {};
@@ -166,10 +170,14 @@ async function toggleBell() {
   api('/api/notifications/read', {}).then(pollShell);
 }
 
+function tokenModal() {
+  modal(`<h2>GitHub token</h2><p>Only needed if the release repository is private. Create a token with read-only access to the repository's contents and paste it here, then check for updates again.</p><div class="fld"><input class="inp" id="gt" type="password" placeholder="ghp_…"></div><div class="mfoot"><button class="btn" data-close>Cancel</button><button class="btn p" id="gts">Save</button></div>`,
+    { onMount: m => $('#gts', m).onclick = async () => { await act(() => api('/api/update/token', { token: $('#gt', m).value }), 'Saved'); closeModal(); } });
+}
 async function checkUpdates() {
   const b = $('#btn-upd'); const r = await busy(b, () => act(() => api('/api/update/check')));
   if (!r) return;
-  if (!r.ok) return toast(r.error, true);
+  if (!r.ok) { toast(r.error, true); if (/token|private|No release/i.test(r.error)) tokenModal(); return; }
   if (!r.update) return toast(`You're up to date (build ${r.current}).`);
   modal(`<h2>Update available</h2><p>Build ${r.latest} is ready (you have ${r.current}). Your data is never touched by an update.</p>${r.notes ? `<p class="small muted">${esc(r.notes).slice(0, 400)}</p>` : ''}
     <div class="prog hidden" id="up-p"><i></i></div><div class="small muted" id="up-t"></div>

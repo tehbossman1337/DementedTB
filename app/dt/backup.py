@@ -11,7 +11,7 @@ SECRET_SETTINGS = ("discord_bot_token", "delivery_key")
 LOCAL_ONLY = ("license_token", "license_pub", "license_url", "device_name", "github_token")
 FORMAT = "dt-backup"
 TABLES = ["mail_accounts", "own_addresses", "orders", "order_items", "order_events", "processed", "attention", "deleted_orders", "exceptions", "webhooks",
-          "notifications", "servers", "channels", "checkouts", "deleted_checkout_keys", "bots", "proxy_lists", "name_maps", "price_rules"]
+          "notifications", "servers", "channels", "checkouts", "deleted_checkout_keys", "bots", "proxy_lists", "name_maps", "price_rules", "vprofiles", "vaccounts"]
 
 
 def _key(passphrase, salt):
@@ -29,6 +29,14 @@ def export(c, passphrase=""):
                     r["password"] = ""
                 if t == "webhooks":
                     r["url"] = ""
+                if t == "vaccounts":
+                    rec = json.loads(r["data"])
+                    rec["password"] = ""
+                    r["data"] = json.dumps(rec)
+                if t == "vprofiles":
+                    rec = json.loads(r["data"])
+                    rec.get("card", {}).update(number="", cvv="")
+                    r["data"] = json.dumps(rec)
         data["tables"][t] = rows
     for r in c.execute("SELECT key,value FROM settings"):
         k = r["key"]

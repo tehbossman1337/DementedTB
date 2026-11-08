@@ -245,7 +245,6 @@ PAGES.settings = async function (v) {
   const kinds = s.exception_kinds;
   const exp = L.expires ? new Date(L.expires * 1000).toLocaleDateString() : 'never';
   v.innerHTML = `<div class="page" style="max-width:1100px"><div class="ph"><div><h1>Settings</h1><p>Demented Toolbox ${esc(s.version)} · build ${s.build}</p></div></div>
-   <div class="card"><h3>Updates</h3><p>Updates are checked and installed from within the app. Your tracking data is never touched by an update.</p><div class="row"><button class="btn" id="s-upd">Check for updates</button><button class="btn ghost sm" id="s-tok">${s.has_github_token ? 'Change' : 'Add'} GitHub token</button></div>${s.update_repo ? '' : '<div class="note" style="margin-top:10px">This copy isn\'t linked to a release feed yet.</div>'}</div>
    <div class="card"><h3>Discord status</h3><p>Shows <b>Playing Demented Toolbox</b> on your Discord profile while the app is open, with how long it's been running. Needs the Discord desktop app on the same machine — the browser version can't be reached.</p>
      <label class="tog" style="margin-bottom:12px"><span class="sw"><input type="checkbox" id="pr-en" ${s.presence.enabled ? 'checked' : ''}><i></i></span>Show Demented Toolbox on my Discord profile</label>
      <label class="tog" style="margin-bottom:14px"><span class="sw"><input type="checkbox" id="pr-ct" ${s.presence.counts ? 'checked' : ''}><i></i></span>Include my order counts</label>
@@ -275,8 +274,6 @@ PAGES.settings = async function (v) {
    <div class="card red"><h3>Fresh start</h3><p>Erases everything in the app — orders, email accounts, webhooks, checkouts, settings — and leaves it like a new install. Your license stays signed in.</p>
      <label class="f">Type <b style="color:var(--text)">FRESH START</b> to confirm</label><div class="row"><input class="inp" id="fs-c" style="max-width:400px"><button class="btn danger" id="fs-go" disabled>Erase everything</button></div></div></div>`;
   const post = (p, b, m) => act(() => api(p, b), m);
-  $('#s-upd').onclick = checkUpdates;
-  $('#s-tok').onclick = () => modal(`<h2>GitHub token</h2><p>Only needed if the release repository is private. It needs read access to the repository's contents.</p><div class="fld"><input class="inp" id="gt" type="password" placeholder="ghp_…"></div><div class="mfoot"><button class="btn" data-close>Cancel</button><button class="btn p" id="gts">Save</button></div>`, { onMount: m => $('#gts', m).onclick = async () => { await post('/api/update/token', { token: $('#gt', m).value }, 'Saved'); closeModal(); refreshPage(); } });
   const pres = () => post('/api/settings/presence', { enabled: $('#pr-en').checked, counts: $('#pr-ct').checked, client_id: $('#pr-id').value });
   $('#pr-en').onchange = pres; $('#pr-ct').onchange = pres; $('#pr-id').onchange = pres;
   $('#lg-go').onclick = async e => { const r = await busy(e.currentTarget, () => post('/api/logs/export', { hide_emails: $('#lg-h').checked })); if (r) { toast('Saved to ' + r.path); api('/api/open_folder', {}); } };

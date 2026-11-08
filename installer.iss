@@ -39,4 +39,4 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\DementedToolbox.exe"; Tasks: 
 [Run]
 Filename: "{app}\DementedToolbox.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 ; silent in-app updates relaunch the app
-Filename: "{app}\DementedToolbox.exe"; Flags: nowait; Check: WizardSilent
+Filename: "{app}\DementedToolbox.exe"; WorkingDir: "{app}"; Flags: nowait; Check: WizardSilent

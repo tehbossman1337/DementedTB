@@ -351,5 +351,69 @@ check("reset arsenal wipes it", len(arsenal.list_checkouts(c)) == 0 and not disc
 r = api("/api/fresh_start", {"confirm": "FRESH START"})
 check("fresh start wipes everything but the license", r["ok"] and not db.rows(c, "SELECT * FROM mail_accounts") and lic.status(db.connect())["state"] == "active")
 
+# ---------------------------------------------------------------- profiles & site accounts
+from dt import profiles as PR, variants as VR
+import json as _j
+c = db.connect()
+vs = VR.generate("123 North Main Street", "", count=12, seed=1)
+check("variants are distinct and keep the street number", len(vs) == 12 and len({(a.lower(), b.lower()) for a, b in vs}) == 12 and all(a.startswith("123 ") for a, _ in vs))
+check("variants are repeatable with a seed", VR.generate("123 N Main St", "Apt 4", 8, seed=7) == VR.generate("123 N Main St", "Apt 4", 8, seed=7))
+api("/api/vault/group", {"kind": "prof", "op": "add", "name": "Pokemon Center"})
+r = api("/api/vault/group", {"kind": "prof", "op": "add", "name": "pokemon center"})
+check("duplicate group names refused", r.get("_code") == 400)
+valor = {"u1": {"name": "Home", "email": "a@b.c", "phoneNumber": "555", "billingSameAsShipping": True, "weird": {"keep": 1}, "card": {"holder": "A B", "number": "4111111111111111", "expiration": "01/30", "cvv": "123"},
+                "shipping": {"firstName": "A", "lastName": "B", "addressLine1": "123 North Main Street", "addressLine2": "", "city": "Austin", "countryName": "United States", "countryCode": "US", "state": "TX", "zipCode": "78701"},
+                "billing": {}, "id": "u1", "totalSpent": 0, "selected": False},
+         "u2": {"name": "Work", "email": "w@b.c", "card": {"number": "5500000000000004"}, "shipping": {"addressLine1": "9 Elm Ave", "city": "Dallas", "state": "TX", "zipCode": "75001"}, "id": "u2"}}
+r = api("/api/profiles/import", {"site": "Pokemon Center", "text": _j.dumps(valor)})
+check("profile import", r["added"] == 2 and r["total"] == 2)
+r = api("/api/profiles/import", {"site": "Pokemon Center", "text": _j.dumps(valor)})
+check("re-import updates, never duplicates", r["added"] == 0 and r["updated"] == 2)
+r = api("/api/profiles/import", {"site": "Pokemon Center", "text": "{\"hello\": 1}"})
+check("non-profile file refused", r.get("_code") == 400)
+ex = PR.export_profiles(c, "Pokemon Center")
+check("export keeps unknown fields", ex["u1"]["weird"] == {"keep": 1} and ex["u1"]["card"]["number"] == "4111111111111111")
+prev = api("/api/profiles/rejig", {"id": "u1", "count": 5, "seed": "x"})
+check("rejig preview saves nothing", len(prev["variants"]) == 5 and len(PR.list_profiles(c)) == 2)
+api("/api/profiles/rejig", {"id": "u1", "count": 5, "seed": "x", "save": True})
+kids = [p for p in PR.list_profiles(c) if p["parent_id"] == "u1"]
+check("rejig saves variants as children of the profile", len(kids) == 5 and kids[0]["rec"]["name"] == "Home-J1" and kids[0]["rec"]["billing"]["addressLine1"] == kids[0]["rec"]["shipping"]["addressLine1"])
+api("/api/profiles/rejig", {"id": "u1", "count": 3, "seed": "y", "save": True, "replace": True})
+check("rejig replace swaps the old variants", len([p for p in PR.list_profiles(c) if p["parent_id"] == "u1"]) == 3)
+r = api("/api/profiles/address", {"ids": ["u1", "u2"], "addr": {"addressLine1": "55 Oak Road", "city": "Plano", "state": "TX", "zipCode": "75024"}, "unique": True})
+check("bulk address change", r["updated"] == 2 and PR.export_profiles(c, ids=["u2"])["u2"]["shipping"]["city"] == "Plano")
+r = api("/api/profiles/address", {"ids": ["u1", "u2"], "addr": {"addressLine1": "55 Oak Road", "city": "Plano", "state": "TX", "zipCode": "75024"}, "units": "101\n102"})
+check("real unit numbers handed out in turn", [PR.export_profiles(c, ids=[i])[i]["shipping"]["addressLine2"] for i in ("u1", "u2")] == ["101", "102"])
+api("/api/profiles/patch", {"ids": ["u1"], "changes": {"oneCheckout": True, "shipping.state": "OK"}})
+e1 = PR.export_profiles(c, ids=["u1"])["u1"]
+check("bulk patch reaches nested fields", e1["oneCheckout"] is True and e1["shipping"]["state"] == "OK" and e1["billing"]["state"] == "OK")
+api("/api/profiles/save", {"site": "Pokemon Center", "rec": {"name": "New", "email": "n@b.c", "card": {"number": "378282246310005"}}})
+check("new profile gets card type", any(p["rec"]["card"]["type"] == "amex" for p in PR.list_profiles(c)))
+api("/api/vault/group", {"kind": "acc", "op": "add", "name": "Pokemon Center"})
+r = api("/api/siteaccounts/add", {"site": "Pokemon Center", "text": "a@x.com:pw1\nb@x.com:pw2:1.2.3.4:80:u:p\na@x.com:dup\n# c\n"})
+check("paste accounts adds and skips duplicates", r["added"] == 2 and r["skipped"] == 1)
+acc = {a["id"]: a["rec"] for a in PR.list_accounts(c)}
+check("proxy keeps its colons", acc["b@x.com"]["proxy"] == "1.2.3.4:80:u:p" and acc["b@x.com"]["password"] == "pw2")
+r = api("/api/siteaccounts/import", {"text": _j.dumps({"version": 1, "site": "Target", "accounts": {"t1": {"id": "t1", "email": "t@x.com", "password": "p", "proxy": "", "session": True, "selected": False}}, "sessions": {"t1": {"c": 1}}})})
+check("accounts import creates the group from the file", r["site"] == "Target" and "Target" in PR.groups(c)["acc"])
+check("accounts export round-trips sessions", PR.export_accounts(c, "Target")["sessions"] == {"t1": {"c": 1}} and PR.export_accounts(c, "Target")["accounts"]["t1"]["session"] is True)
+api("/api/siteaccounts/patch", {"site": "Pokemon Center", "ids": ["a@x.com"], "changes": {"proxy": "9.9.9.9:1"}})
+check("bulk proxy", {a["id"]: a["rec"] for a in PR.list_accounts(c)}["a@x.com"]["proxy"] == "9.9.9.9:1")
+r = api("/api/vault/group", {"kind": "prof", "op": "rename", "old": "Pokemon Center", "name": "PC"})
+check("rename group moves its profiles", all(p["site"] == "PC" for p in PR.list_profiles(c)) and "PC" in PR.groups(c)["prof"] and "Pokemon Center" not in PR.groups(c)["prof"])
+bk = backup.export(c)
+check("backup without passphrase drops card numbers and passwords", "4111111111111111" not in bk and "pw1" not in bk)
+bke = backup.export(c, "pw")
+check("encrypted backup carries them", "4111111111111111" not in bke)
+api("/api/profiles/delete", {"ids": ["u1"]})
+check("deleting a profile deletes its variants", not [p for p in PR.list_profiles(c) if p["id"] == "u1" or p["parent_id"] == "u1"])
+api("/api/vault/group", {"kind": "acc", "op": "delete", "name": "Target"})
+check("delete group removes its accounts", not [a for a in PR.list_accounts(c) if a["site"] == "Target"])
+# the in-app updater must hand the installer a clean PyInstaller environment
+import inspect
+from dt import updater as _u
+src = inspect.getsource(_u.install)
+check("updater strips PyInstaller env for the installer", "_PYI" in src and "PYINSTALLER_RESET_ENVIRONMENT" in src and "DETACHED_PROCESS" in src)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

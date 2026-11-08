@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, logs, mail, notify, orders, parsers, presence, updater)
+from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
 OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server"}
@@ -538,6 +538,109 @@ def _(c, b):
             db.put(c, k, v)
     return {"ok": True, "removed": n}
 
+
+
+# ---------------------------------------------------------------- profiles & site accounts
+def _export_file(name, obj):
+    path = os.path.join(config.exports_dir(), f"{name}_{time.strftime('%Y-%m-%d_%H%M%S')}.json")
+    open(path, "w", encoding="utf-8").write(json.dumps(obj, indent=2))
+    return {"ok": True, "path": path, "count": len(obj.get("accounts", obj)) if isinstance(obj, dict) else 0}
+
+
+def _ids(b):
+    return [str(i) for i in (b.get("ids") or [])]
+
+
+@get("/api/vault")
+def _(c, q):
+    return {"profiles": profiles.list_profiles(c), "accounts": profiles.list_accounts(c), "groups": profiles.groups(c)}
+
+
+@post("/api/profiles/save")
+def _(c, b):
+    return {"ok": True, "id": profiles.save_profile(c, str(b.get("site") or ""), b.get("rec") or {}, b.get("id"))}
+
+
+@post("/api/profiles/import")
+def _(c, b):
+    return {"ok": True, **profiles.import_profiles(c, need_text(b, "site", "Pick a group first"), b.get("text") or "", bool(b.get("replace")))}
+
+
+@post("/api/profiles/export")
+def _(c, b):
+    return _export_file("profiles", profiles.export_profiles(c, b.get("site") or None, _ids(b) or None))
+
+
+@post("/api/profiles/delete")
+def _(c, b):
+    return {"ok": True, "removed": profiles.delete_profiles(c, _ids(b))}
+
+
+@post("/api/profiles/patch")
+def _(c, b):
+    return {"ok": True, "updated": profiles.patch_profiles(c, _ids(b), b.get("changes") or {})}
+
+
+@post("/api/profiles/move")
+def _(c, b):
+    profiles.move_profiles(c, _ids(b), str(b.get("site") or ""))
+    return {"ok": True}
+
+
+@post("/api/profiles/rejig")
+def _(c, b):
+    v = profiles.rejig(c, str(b.get("id") or ""), b.get("count") or 10, bool(b.get("use_units", True)), b.get("seed") or None, bool(b.get("save")), bool(b.get("replace", True)))
+    return {"ok": True, "variants": v}
+
+
+@post("/api/profiles/address")
+def _(c, b):
+    units = [u.strip() for u in str(b.get("units") or "").replace(",", "\n").splitlines() if u.strip()]
+    return {"ok": True, **profiles.bulk_address(c, _ids(b), b.get("addr") or {}, bool(b.get("unique")), b.get("seed") or None, bool(b.get("use_units", True)), b.get("target") or "both", units or None)}
+
+
+@post("/api/siteaccounts/save")
+def _(c, b):
+    return {"ok": True, "id": profiles.save_account(c, str(b.get("site") or ""), b.get("rec") or {}, b.get("old_id"))}
+
+
+@post("/api/siteaccounts/add")
+def _(c, b):
+    return {"ok": True, **profiles.add_accounts_text(c, need_text(b, "site", "Pick a group first"), b.get("text"))}
+
+
+@post("/api/siteaccounts/import")
+def _(c, b):
+    return {"ok": True, **profiles.import_accounts(c, b.get("text") or "", b.get("site") or None, bool(b.get("replace")))}
+
+
+@post("/api/siteaccounts/export")
+def _(c, b):
+    return _export_file("accounts", profiles.export_accounts(c, need_text(b, "site", "Pick a group first"), _ids(b) or None))
+
+
+@post("/api/siteaccounts/delete")
+def _(c, b):
+    return {"ok": True, "removed": profiles.delete_accounts(c, str(b.get("site") or ""), _ids(b))}
+
+
+@post("/api/siteaccounts/patch")
+def _(c, b):
+    return {"ok": True, "updated": profiles.patch_accounts(c, str(b.get("site") or ""), _ids(b), b.get("changes") or {})}
+
+
+@post("/api/vault/group")
+def _(c, b):
+    kind, op = str(b.get("kind") or ""), str(b.get("op") or "")
+    if kind not in ("acc", "prof"):
+        raise ValueError("Unknown group type")
+    if op == "add":
+        return {"ok": True, "name": profiles.add_group(c, kind, b.get("name"))}
+    if op == "rename":
+        return {"ok": True, "name": profiles.rename_group(c, kind, str(b.get("old") or ""), b.get("name"))}
+    if op == "delete":
+        return {"ok": True, "removed": profiles.delete_group(c, kind, str(b.get("name") or ""))}
+    raise ValueError("Unknown action")
 
 # ---------------------------------------------------------------- updates / misc
 @get("/api/update/check")

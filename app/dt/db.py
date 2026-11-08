@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS checkouts(
   channel_id TEXT DEFAULT '', notes TEXT DEFAULT '', deleted_at TEXT, created_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_co_msg ON checkouts(message_id) WHERE message_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS deleted_checkout_keys(message_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS vprofiles(id TEXT PRIMARY KEY, site TEXT NOT NULL, parent_id TEXT, name TEXT, email TEXT, data TEXT NOT NULL, created_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_vp_site ON vprofiles(site);
+CREATE TABLE IF NOT EXISTS vaccounts(site TEXT NOT NULL, id TEXT NOT NULL, email TEXT, data TEXT NOT NULL, PRIMARY KEY(site,id));
 CREATE TABLE IF NOT EXISTS bots(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, monthly_cost REAL DEFAULT 0, active_from TEXT DEFAULT '', archived INTEGER DEFAULT 0, notes TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS proxy_lists(

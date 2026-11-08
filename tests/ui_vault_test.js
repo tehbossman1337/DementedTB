@@ -1,0 +1,30 @@
+// Drives Profiles + Site accounts in the real UI. Usage: node ui_vault_test.js <appUrl> <licenseKey> <shotsDir>
+const { chromium } = require('playwright'); const fs = require('fs');
+const [, , APP, KEY, OUT] = process.argv;
+let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log('FAIL:', m); } };
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1500, height: 940 } }); const p = await ctx.newPage(); const errs = [];
+  p.on('pageerror', e => errs.push(e.message)); p.on('console', m => m.type() === 'error' && !/403/.test(m.text()) && errs.push(m.text())); p.on('dialog', d => d.accept());
+  await p.goto(APP); await p.waitForSelector('.lockcard'); await p.fill('#lk', KEY); await p.click('#lgo'); await p.waitForSelector('#app:not(.hidden)');
+  ok(!(await p.textContent('#side')).includes('Coming soon'), 'no coming-soon row');
+  await p.click('[data-nav="settings"]'); await p.waitForSelector('.card'); ok(!(await p.textContent('#view')).includes('Updates are checked'), 'settings has no Updates card');
+  await p.click('[data-nav="profiles"]'); await p.waitForSelector('#g-add');
+  await p.click('#g-add'); await p.fill('#gn', 'Pokemon Center'); await p.click('#gok'); await p.waitForSelector('.gchip.on');
+  const f = '/tmp/vp.json';
+  fs.writeFileSync(f, JSON.stringify({ u1: { name: 'Home', email: 'a@b.c', card: { holder: 'A B', number: '4111111111111111', expiration: '01/30', cvv: '123' }, shipping: { firstName: 'A', lastName: 'B', addressLine1: '123 North Main Street', city: 'Austin', state: 'TX', zipCode: '78701', countryName: 'United States', countryCode: 'US' }, id: 'u1' }, u2: { name: 'Work', email: 'w@b.c', card: { number: '5500000000000004' }, shipping: { addressLine1: '9 Elm Ave', city: 'Dallas', state: 'TX', zipCode: '75001' }, id: 'u2' } }));
+  await p.click('#p-imp'); const [ch] = await Promise.all([p.waitForEvent('filechooser'), p.click('#ipick')]); await ch.setFiles(f);
+  await p.waitForSelector('.pcard'); ok(await p.locator('.pcard').count() === 2, 'two profile cards');
+  await p.screenshot({ path: OUT + '/profiles.png' });
+  await p.click('#p-blur'); await p.waitForSelector('.vwrap.blurred'); await p.screenshot({ path: OUT + '/profiles-blur.png' });
+  await p.click('#p-blur');
+  await p.locator('.pcard', { hasText: 'Home' }).locator('[data-a="jig"]').click(); await p.click('#jp'); await p.waitForSelector('.vlist div'); ok(await p.locator('.vlist div').count() === 10, 'rejig preview 10');
+  await p.screenshot({ path: OUT + '/rejig.png' }); await p.click('#jsv'); await p.waitForSelector('.pcard >> nth=11'); ok(await p.locator('.pcard').count() === 12, 'rejig saved');
+  await p.locator('.pcard', { hasText: 'Work' }).locator('[data-a="edit"]').click(); await p.waitForSelector('#psv'); await p.screenshot({ path: OUT + '/profile-edit.png' }); await p.fill('#pn', 'Work 2'); await p.click('#psv'); await p.waitForSelector('.pcard:has-text("Work 2")');
+  await p.click('[data-view="table"]'); await p.waitForSelector('table.t'); ok(await p.locator('table.t tbody tr').count() === 12, 'table view');
+  await p.click('#p-selall'); await p.waitForSelector('.bulk'); await p.click('[data-b="addr"]'); await p.screenshot({ path: OUT + '/address.png' }); await p.keyboard.press('Escape');
+  await p.click('[data-nav="siteaccts"]'); await p.waitForSelector('#g-add'); await p.click('#g-add'); await p.fill('#gn', 'Pokemon Center'); await p.click('#gok'); await p.waitForSelector('.gchip.on');
+  await p.click('#a-paste'); await p.fill('#pl', 'a@x.com:pw1\nb@x.com:pw2:1.2.3.4:80:u:p'); await p.click('#pok'); await p.waitForSelector('table.t tbody tr'); ok(await p.locator('table.t tbody tr').count() === 2, 'two accounts');
+  await p.screenshot({ path: OUT + '/accounts.png' });
+  ok(errs.length === 0, 'no console errors: ' + errs.join(' | '));
+  await b.close(); console.log(fails ? fails + ' FAILED' : 'vault UI ok');
+})();

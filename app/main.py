@@ -37,7 +37,28 @@ class WindowApi:
         os._exit(0)
 
 
+def check():
+    """Build smoke test (python main.py --check): everything the packaged app needs is present and the core code runs. Exit code 0 = ok."""
+    import tempfile
+    try:
+        from dt import db, inventory, profiles, orders, mail  # noqa: F401
+        c = db.connect(os.path.join(tempfile.mkdtemp(), "check.db"))
+        assert inventory.lists(c)["pokemon_sets"], "inventory lists missing"
+        inventory.dashboard(c)
+        profiles.groups(c)
+        assert os.path.isfile(os.path.join(config.WEB_DIR, "index.html")), "web files missing"
+        for f in ("core.js", "pages.js", "pages2.js", "pages3.js", "pages4.js", "boot.js", "app.css"):
+            assert os.path.isfile(os.path.join(config.WEB_DIR, f)), f + " missing"
+        assert len(server.GET) > 10 and len(server.POST) > 60
+        return 0
+    except Exception:
+        _log("check failed:\n" + traceback.format_exc())
+        return 3
+
+
 def main():
+    if "--check" in sys.argv:
+        os._exit(check())
     _log("starting")
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
     server.start_background()

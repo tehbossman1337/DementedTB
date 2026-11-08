@@ -33,6 +33,11 @@ jobs:
           python -m PyInstaller --noconfirm --windowed --onedir --name DementedToolbox --icon app/app.ico --paths app --add-data "app/web;web" @extra --collect-all webview app/main.py
       - name: Check the build produced the exe
         run: if (!(Test-Path dist/DementedToolbox/DementedToolbox.exe)) { throw "exe missing" }
+      - name: Smoke-test the packaged app (starts it headless and checks its files and core code)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist/DementedToolbox/DementedToolbox.exe" -ArgumentList "--check" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { if (Test-Path "$env:APPDATA/DementedToolbox/app.log") { Get-Content "$env:APPDATA/DementedToolbox/app.log" -Tail 40 }; throw "packaged app failed its self-check (exit $($p.ExitCode))" }
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Build installer

@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 
 from . import db, notify
 
-DATA = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "inv_data.json"), encoding="utf-8"))
+from .inv_data import DATA
 CATEGORIES = ["Pokemon Card", "Graphics Card"]
 DEFAULTS = {"partner1": "Me", "partner2": "Partner", "aging_days": 90, "drop_pct": 0.15, "monthly_target": 0.0, "big_sale": 0.0, "auto_from_orders": 1, "tax_year": 0}
 GPU_WORDS = re.compile(r"\b(rtx|gtx|radeon|geforce|gpu|graphics card|video card|nvidia)\b", re.I)

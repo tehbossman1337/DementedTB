@@ -11,7 +11,7 @@ SECRET_SETTINGS = ("discord_bot_token", "delivery_key")
 LOCAL_ONLY = ("license_token", "license_pub", "license_url", "device_name", "github_token")
 FORMAT = "dt-backup"
 TABLES = ["mail_accounts", "own_addresses", "orders", "order_items", "order_events", "processed", "attention", "deleted_orders", "exceptions", "webhooks",
-          "notifications", "servers", "channels", "checkouts", "deleted_checkout_keys", "bots", "proxy_lists", "name_maps", "price_rules", "vprofiles", "vaccounts"]
+          "notifications", "servers", "channels", "checkouts", "deleted_checkout_keys", "bots", "proxy_lists", "name_maps", "price_rules", "vprofiles", "vaccounts", "inv_items", "inv_sales", "inv_receipts", "inv_fees", "inv_currencies", "inv_order_links"]
 
 
 def _key(passphrase, salt):

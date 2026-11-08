@@ -96,6 +96,7 @@ def apply_event(c, ev, account="", manual=False, announce=True):
         arsenal.link_order(c, oid)  # a new/updated order may be the proof a checkout was waiting for
     except Exception:
         pass
+    _to_inventory(c, oid)
     return outcome, oid
 
 
@@ -200,6 +201,15 @@ def save_manual(c, d, oid=None):
     return oid
 
 
+def _to_inventory(c, oid):
+    try:
+        if c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"] == "delivered":
+            from . import inventory
+            inventory.on_delivered(c, oid)
+    except Exception:
+        pass
+
+
 def set_status(c, ids, status):
     if status not in ALL_STATUSES:
         raise ValueError("Unknown status")
@@ -208,6 +218,8 @@ def set_status(c, ids, status):
         c.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?", (status, db.now(), i))
         log_event(c, i, status, "Set by hand")
     c.commit()
+    for i in ids:
+        _to_inventory(c, i)
 
 
 def delete_orders(c, ids):

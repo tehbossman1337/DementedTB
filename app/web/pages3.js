@@ -195,7 +195,7 @@ PAGES.siteaccts = async function (v) {
   const rows = all.filter(a => !q || (a.rec.email + ' ' + a.rec.proxy).toLowerCase().includes(q));
   const byId = Object.fromEntries(all.map(a => [a.id, a]));
   vstate.sel = new Set([...vstate.sel].filter(i => byId[i]));
-  v.innerHTML = `<div class="page vwrap ${vstate.blur ? 'blurred' : ''}"><div class="ph"><div><h1>Site accounts</h1><p>Store logins and proxies per website. Paste a list, import your file, edit in bulk, and export. Everything stays on this computer.</p></div>
+  v.innerHTML = `<div class="page vwrap ${vstate.blur ? 'blurred' : ''}"><div class="ph"><div><h1>Accounts</h1><p>Store logins and proxies per website. Paste a list, import your file, edit in bulk, and export. Everything stays on this computer.</p></div>
     <div class="acts"><button class="btn" id="a-blur">${vstate.blur ? 'Blur: on' : 'Blur: off'}</button><button class="btn" id="a-imp">Import file</button><button class="btn" id="a-exp" ${all.length ? '' : 'disabled'}>Export</button><button class="btn" id="a-paste" ${vstate.ga ? '' : 'disabled'}>Paste a list</button><button class="btn p" id="a-add" ${vstate.ga ? '' : 'disabled'}>Add account</button></div></div>
     ${groupBar('acc', groups, counts, vstate.ga)}
     ${vstate.ga ? `<div class="filters"><input class="inp" id="a-q" style="max-width:320px" placeholder="Search email or proxy…" value="${esc(vstate.q)}"><span class="note">${all.length} account${all.length === 1 ? '' : 's'}</span><span class="grow"></span></div><div id="a-bulk"></div><div id="a-list"></div>` : ''}</div>`;

@@ -24,6 +24,11 @@ const IC = {
   user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c.6-3.8 3.7-6 7.5-6s6.9 2.200 7.500 6"/>',
   card: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M7 15h4"/>',
   key: '<circle cx="8" cy="15" r="3.5"/><path d="M10.500 12.500L19 4M16 7l2.500 2.500M13.500 9.500L15.500 11.500"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 002 2h10a2 2 0 002-2V9M10 13h4"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.500" cy="8.500" r="1.400"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  scan: '<path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
 };
 const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${IC[n] || ''}</svg>`;
@@ -92,13 +97,14 @@ const S = { route: 'tracking', info: null, page: null, shell: null, tok: 0 };
 const NAV = [
   { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
   { id: 'arsenal', label: 'Arsenal', icon: 'target', items: [['checkouts', 'Checkouts', 'doc'], ['servers', 'Servers & channels', 'discord'], ['bots', 'Bots & proxies', 'layers'], ['rules', 'Price rules', 'doc']] },
-  { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Site accounts', 'key']] },
+  { id: 'inv', label: 'Inventory', icon: 'archive', items: [['inv_dash', 'Dashboard', 'chart'], ['inv_items', 'Items', 'box'], ['inv_sales', 'Sales', 'tag'], ['inv_receipts', 'Receipts', 'receipt'], ['inv_scan', 'Scan station', 'scan'], ['inv_tax', 'Tax summary', 'doc'], ['inv_settings', 'Fees & settings', 'gear']] },
+  { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Accounts', 'key']] },
 ];
 const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
-  checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], profiles: ['Profiles & Accounts', 'Profiles'], siteaccts: ['Profiles & Accounts', 'Site accounts'], settings: ['Demented Toolbox', 'Settings'] };
+  checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], profiles: ['Profiles & Accounts', 'Profiles'], siteaccts: ['Profiles & Accounts', 'Accounts'], inv_dash: ['Inventory', 'Dashboard'], inv_items: ['Inventory', 'Items'], inv_sales: ['Inventory', 'Sales'], inv_receipts: ['Inventory', 'Receipts'], inv_scan: ['Inventory', 'Scan station'], inv_tax: ['Inventory', 'Tax summary'], inv_settings: ['Inventory', 'Fees & settings'], settings: ['Demented Toolbox', 'Settings'] };
 
 function renderShell() {
-  const open = store.get('groups', { tracker: true, arsenal: true, vault: true });
+  const open = store.get('groups', { tracker: true, arsenal: true, inv: true, vault: true });
   $('#side').innerHTML = `
     <div class="brand"><div class="logo">${LOGO}</div><div><b>Demented Toolbox</b><span>v${esc(S.info.version)}</span></div></div>
     <div class="sec">MODULES</div>
@@ -169,7 +175,7 @@ async function pollShell() {
     if (L.state !== 'active') showLock(); else { if (S.sig && S.sig !== sig) softRefresh(); S.sig = sig; }
   } catch (e) { }
 }
-function softRefresh() { if (S.inflight) return; const ae = document.activeElement; if (['tracking', 'attention', 'email', 'checkouts', 'servers'].includes(S.route) && $('#overlay').classList.contains('hidden') && $('#drawer').classList.contains('hidden') && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) refreshPage(); }
+function softRefresh() { if (S.inflight) return; const ae = document.activeElement; if (['tracking', 'attention', 'email', 'checkouts', 'servers', 'inv_dash'].includes(S.route) && $('#overlay').classList.contains('hidden') && $('#drawer').classList.contains('hidden') && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) refreshPage(); }
 
 async function toggleBell() {
   const p = $('#bellpanel');

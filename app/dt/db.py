@@ -58,6 +58,22 @@ CREATE TABLE IF NOT EXISTS deleted_checkout_keys(message_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS vprofiles(id TEXT PRIMARY KEY, site TEXT NOT NULL, parent_id TEXT, name TEXT, email TEXT, data TEXT NOT NULL, created_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_vp_site ON vprofiles(site);
 CREATE TABLE IF NOT EXISTS vaccounts(site TEXT NOT NULL, id TEXT NOT NULL, email TEXT, data TEXT NOT NULL, PRIMARY KEY(site,id));
+CREATE TABLE IF NOT EXISTS inv_items(
+  id INTEGER PRIMARY KEY, sku TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'Pokemon Card', name TEXT NOT NULL, pokemon_set TEXT DEFAULT '', card_no TEXT DEFAULT '',
+  condition TEXT DEFAULT '', grading TEXT DEFAULT '', qty INTEGER DEFAULT 1, added_by TEXT DEFAULT '', purchase_date TEXT DEFAULT '', purchase_price REAL DEFAULT 0,
+  purchase_source TEXT DEFAULT '', listing_platform TEXT DEFAULT '', listed_price REAL DEFAULT 0, currency TEXT DEFAULT 'USD', market_price REAL DEFAULT 0,
+  location TEXT DEFAULT '', notes TEXT DEFAULT '', barcode TEXT DEFAULT '', created_at TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS inv_sales(
+  id INTEGER PRIMARY KEY, sku TEXT NOT NULL, sale_date TEXT, sold_by TEXT DEFAULT '', platform TEXT DEFAULT '', buyer TEXT DEFAULT '', sale_price REAL DEFAULT 0,
+  ship_charged REAL DEFAULT 0, ship_cost REAL DEFAULT 0, other_fees REAL DEFAULT 0, qty INTEGER DEFAULT 1, notes TEXT DEFAULT '', created_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_inv_sales_sku ON inv_sales(sku);
+CREATE TABLE IF NOT EXISTS inv_receipts(
+  id INTEGER PRIMARY KEY, date TEXT, vendor TEXT DEFAULT '', category TEXT DEFAULT '', description TEXT DEFAULT '', sku TEXT DEFAULT '', amount REAL DEFAULT 0,
+  method TEXT DEFAULT '', ref TEXT DEFAULT '', notes TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS inv_fees(platform TEXT PRIMARY KEY, fee_pct REAL DEFAULT 0, fixed REAL DEFAULT 0, processing TEXT DEFAULT '', notes TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS inv_currencies(code TEXT PRIMARY KEY, name TEXT, rate REAL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS inv_scans(id INTEGER PRIMARY KEY, ts TEXT, action TEXT, sku TEXT, result TEXT);
+CREATE TABLE IF NOT EXISTS inv_order_links(order_id INTEGER PRIMARY KEY, sku TEXT);
 CREATE TABLE IF NOT EXISTS bots(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, monthly_cost REAL DEFAULT 0, active_from TEXT DEFAULT '', archived INTEGER DEFAULT 0, notes TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS proxy_lists(

@@ -409,6 +409,53 @@ api("/api/profiles/delete", {"ids": ["u1"]})
 check("deleting a profile deletes its variants", not [p for p in PR.list_profiles(c) if p["id"] == "u1" or p["parent_id"] == "u1"])
 api("/api/vault/group", {"kind": "acc", "op": "delete", "name": "Target"})
 check("delete group removes its accounts", not [a for a in PR.list_accounts(c) if a["site"] == "Target"])
+# ---------------------------------------------------------------- inventory
+from dt import inventory as INV
+c = db.connect()
+r = api("/api/inv/items/save", {"item": {"name": "Pokemon 151 Elite Trainer Box", "qty": 4, "purchase_price": 40, "purchase_date": "2026-09-01", "listed_price": 70, "listing_platform": "eBay"}})
+r2_ = api("/api/inv/items/save", {"item": {"name": "RTX 4070 Super", "qty": 2, "purchase_price": 500, "purchase_date": "2026-09-01"}})
+it = {x["sku"]: x for x in INV.list_items(c)}
+check("SKUs are numbered per category", "PK-0001" in it and "GC-0001" in it and it["GC-0001"]["category"] == "Graphics Card")
+r = api("/api/inv/items/save", {"item": {"name": "x", "qty": 0}})
+check("quantity must be at least 1", r.get("_code") == 400)
+r = api("/api/inv/sales/save", {"sale": {"sku": "PK-0001", "qty": 2, "sale_price": 150, "ship_charged": 10, "ship_cost": 8, "platform": "eBay", "sold_by": "Me", "sale_date": "2026-10-01", "buyer": "Sam"}})
+s1 = INV.list_sales(c)[0]
+fee = round((150 + 10) * 0.1335 + 0.30, 2)
+check("platform fee, net and profit are calculated", s1["platform_fee"] == fee and s1["net"] == round(160 - fee - 8, 2) and s1["profit"] == round(160 - fee - 8 - 80, 2) and s1["roi"] is not None)
+r = api("/api/inv/sales/save", {"sale": {"sku": "PK-0001", "qty": 3, "sale_price": 1}})
+check("can't sell more than is left", r.get("_code") == 400)
+r = api("/api/inv/sales/save", {"sale": {"sku": "PK-0001", "qty": 1, "sale_price": 1, "sale_date": "2026-01-01"}})
+check("sale can't predate the purchase", r.get("_code") == 400)
+r = api("/api/inv/items/save", {"id": it["PK-0001"]["id"], "item": {**{k: it["PK-0001"][k] for k in INV.ITEM_COLS}, "qty": 1}})
+check("quantity can't drop below what's sold", r.get("_code") == 400)
+check("item status follows sales", {x["sku"]: x for x in INV.list_items(c)}["PK-0001"]["status"] == "Partly sold")
+api("/api/inv/receipts/save", {"receipt": {"date": "2026-10-02", "vendor": "Uline", "category": "Shipping Supplies", "amount": 20}})
+d = INV.dashboard(c)
+check("dashboard totals", d["revenue"] == 150 and d["expenses"] == 20 and d["in_stock"] == 4 and d["net_profit"] == round(s1["profit"] - 20, 2))
+t = INV.tax_summary(c, 2026)
+check("tax summary", t["gross"] == 150 and t["cogs"] == 80 and t["expenses"] == 20 and t["net"] == round(150 - 80 - s1["total_fees"] - 8 - 20, 2))
+r = api("/api/inv/scan", {"mode": "receive", "code": "PK-0001"})
+check("scan receive adds one", not r["created"] and {x["sku"]: x for x in INV.list_items(c)}["PK-0001"]["qty"] == 5)
+r = api("/api/inv/scan", {"mode": "receive", "code": "012345678905"})
+check("unknown barcode creates a row and remembers it", r["created"] and INV.scan(c, "receive", "012345678905")["created"] is False)
+r = api("/api/inv/scan", {"mode": "sell", "code": "PK-0001", "sold_by": "Me"})
+check("scan sell logs a sale at the listed price", r["created"] and not r["needs_price"])
+r = api("/api/inv/items/delete", {"ids": [it["PK-0001"]["id"]]})
+check("item with sales can't be deleted", r["deleted"] == 0 and r["blocked"])
+csvt = INV.export_csv(c, "inventory")
+check("csv export has headers and rows", csvt.startswith("sku,category") and "GC-0001" in csvt)
+r = api("/api/inv/csv/import", {"name": "inventory", "text": "sku,name,qty,purchase_price\nPK-0900,Imported Box,3,10\n,,,\nGC-0900,,0,5\n"})
+check("csv import adds good rows, reports bad ones", r["added"] == 1 and r["error_count"] == 1)
+r = api("/api/inv/fee/save", {"fee": {"platform": "MyShop", "fee_pct": "5", "fixed": "0.25"}})
+check("fee typed as percent is stored as a fraction", {f["platform"]: f for f in INV.list_fees(c)}["MyShop"]["fee_pct"] == 0.05)
+# delivered tracker orders land in inventory at a weighted-average cost
+ev = {"retailer": "Target", "order_number": "912340001", "status": "delivered", "total": 90.0, "date": "2026-10-20", "items": [{"name": "Pokemon 151 Elite Trainer Box", "qty": 2, "price": 45}]}
+orders.apply_event(c, ev, announce=False)
+box = {x["sku"]: x for x in INV.list_items(c)}["PK-0001"]
+check("delivered order tops up the matching item at a weighted cost", box["qty"] == 7 and abs(box["purchase_price"] - (5 * 40 + 2 * 45) / 7) < 0.01, box)
+orders.apply_event(c, ev, announce=False)
+check("same delivery isn't added twice", {x["sku"]: x for x in INV.list_items(c)}["PK-0001"]["qty"] == 7)
+
 # the in-app updater must hand the installer a clean PyInstaller environment
 import inspect
 from dt import updater as _u

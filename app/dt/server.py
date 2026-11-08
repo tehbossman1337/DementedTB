@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, logs, mail, notify, orders, parsers, presence, profiles, updater)
+from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
 OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
@@ -650,6 +650,133 @@ def _(c, b):
         pass
     return {"ok": True}
 
+
+
+# ---------------------------------------------------------------- inventory
+@get("/api/inv/dashboard")
+def _(c, q):
+    return inventory.dashboard(c)
+
+
+@get("/api/inv/items")
+def _(c, q):
+    return {"items": inventory.list_items(c), "lists": inventory.lists(c), "settings": inventory.settings(c)}
+
+
+@get("/api/inv/sales")
+def _(c, q):
+    fx = {r["code"]: r["rate"] for r in inventory.list_currencies(c)}
+    items = [{"sku": i["sku"], "name": i["name"], "unit_cost": i["purchase_price"] * fx.get(i["currency"], 1.0), "left": i["qty_remaining"], "listed": i["listed_price"], "platform": i["listing_platform"]} for i in inventory.list_items(c)]
+    return {"sales": inventory.list_sales(c), "lists": inventory.lists(c), "fees": {f["platform"]: f for f in inventory.list_fees(c)}, "items": items}
+
+
+@get("/api/inv/receipts")
+def _(c, q):
+    return {"receipts": inventory.list_receipts(c), "lists": inventory.lists(c)}
+
+
+@get("/api/inv/tax")
+def _(c, q):
+    y = int((q.get("year") or [0])[0] or 0) or inventory.settings(c)["tax_year"] or __import__("datetime").date.today().year
+    return inventory.tax_summary(c, y)
+
+
+@get("/api/inv/settings")
+def _(c, q):
+    return {"settings": inventory.settings(c), "fees": inventory.list_fees(c), "currencies": inventory.list_currencies(c)}
+
+
+@get("/api/inv/scans")
+def _(c, q):
+    return {"scans": inventory.list_scans(c), "team": inventory.team(c)}
+
+
+@post("/api/inv/items/save")
+def _(c, b):
+    return {"ok": True, "id": inventory.save_item(c, b.get("item") or {}, int(b["id"]) if b.get("id") else None)}
+
+
+@post("/api/inv/items/delete")
+def _(c, b):
+    return {"ok": True, **inventory.delete_items(c, [int(i) for i in b.get("ids") or []])}
+
+
+@post("/api/inv/sales/save")
+def _(c, b):
+    return {"ok": True, **inventory.save_sale(c, b.get("sale") or {}, int(b["id"]) if b.get("id") else None)}
+
+
+@post("/api/inv/sales/delete")
+def _(c, b):
+    inventory.delete_sales(c, [int(i) for i in b.get("ids") or []])
+    return {"ok": True}
+
+
+@post("/api/inv/receipts/save")
+def _(c, b):
+    inventory.save_receipt(c, b.get("receipt") or {}, int(b["id"]) if b.get("id") else None)
+    return {"ok": True}
+
+
+@post("/api/inv/receipts/delete")
+def _(c, b):
+    inventory.delete_receipts(c, [int(i) for i in b.get("ids") or []])
+    return {"ok": True}
+
+
+@post("/api/inv/scan")
+def _(c, b):
+    return {"ok": True, **inventory.scan(c, str(b.get("mode") or ""), b.get("code") or "", str(b.get("sold_by") or ""))}
+
+
+@post("/api/inv/settings/save")
+def _(c, b):
+    return {"ok": True, "settings": inventory.save_settings(c, b.get("settings") or {})}
+
+
+@post("/api/inv/fee/save")
+def _(c, b):
+    inventory.save_fee(c, b.get("fee") or {}, b.get("old") or None)
+    return {"ok": True}
+
+
+@post("/api/inv/fee/delete")
+def _(c, b):
+    inventory.delete_fee(c, str(b.get("platform") or ""))
+    return {"ok": True}
+
+
+@post("/api/inv/currency/save")
+def _(c, b):
+    inventory.save_currency(c, b.get("currency") or {})
+    return {"ok": True}
+
+
+@post("/api/inv/currency/delete")
+def _(c, b):
+    inventory.delete_currency(c, str(b.get("code") or ""))
+    return {"ok": True}
+
+
+@post("/api/inv/csv/export")
+def _(c, b):
+    name = str(b.get("name") or "")
+    text = inventory.export_csv(c, name)
+    path = os.path.join(config.exports_dir(), f"inventory-{name}_{time.strftime('%Y-%m-%d_%H%M%S')}.csv")
+    open(path, "w", encoding="utf-8", newline="").write(text)
+    return {"ok": True, "path": path}
+
+
+@post("/api/inv/csv/import")
+def _(c, b):
+    return {"ok": True, **inventory.import_csv(c, str(b.get("name") or ""), b.get("text") or "")}
+
+
+@post("/api/inv/reset")
+def _(c, b):
+    confirm_word(b)
+    n = db.wipe_tables(c, ["inv_items", "inv_sales", "inv_receipts", "inv_scans", "inv_order_links"])
+    return {"ok": True, "removed": n}
 
 # ---------------------------------------------------------------- updates / misc
 @get("/api/update/check")

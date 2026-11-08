@@ -33,6 +33,19 @@ def server_url(c=None):
     return v.rstrip("/")
 
 
+def required(c=None):
+    """Licensing is enforced only when this build points at a license server (license_url.txt baked in by CI, DT_LICENSE_URL,
+    or a server address saved in the app). With none configured the app runs open - set the LICENSE_URL repo variable to turn it on."""
+    own = False
+    if c is None:
+        c, own = db.connect(), True
+    try:
+        return bool(db.get(c, "license_url") or os.environ.get("DT_LICENSE_URL") or config.read_res("license_url.txt"))
+    finally:
+        if own:
+            c.close()
+
+
 def device_id():
     """Stable per-computer id: a random id kept in the data folder, mixed with the Windows MachineGuid where there is one."""
     p = os.path.join(config.DATA_DIR, "device.id")
@@ -116,6 +129,8 @@ class LicenseError(Exception):
 def status(c):
     """What the UI needs: {state, user, plan, expires, hint, device_name}. state: none | active | expired | stale | invalid."""
     base = {"state": "none", "device_name": device_name(c), "server": server_url(c), "bypass": bool(os.environ.get("DT_LICENSE_BYPASS"))}
+    if not required(c):
+        return {**base, "state": "active", "user": "Demented", "plan": "open", "expires": None, "hint": "", "open": True}
     if os.environ.get("DT_LICENSE_BYPASS"):  # developer/test switch only; never set in a shipped build
         return {**base, "state": "active", "user": "Developer", "plan": "dev", "expires": None, "hint": "DEV"}
     tok = db.get(c, "license_token")
@@ -197,7 +212,7 @@ def refresh_loop(stop=None):
         try:
             c = db.connect()
             try:
-                if db.get(c, "license_token") and not os.environ.get("DT_LICENSE_BYPASS"):
+                if required(c) and db.get(c, "license_token") and not os.environ.get("DT_LICENSE_BYPASS"):
                     refresh(c)
             finally:
                 c.close()

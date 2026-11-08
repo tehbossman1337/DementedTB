@@ -78,3 +78,8 @@ Build locally on Windows: `python -m PyInstaller --noconfirm --windowed --onedir
 * "Live" is a fast check of each inbox every ~20 seconds, not a held-open IMAP IDLE connection.
 * Outlook/Hotmail personal accounts usually reject password sign-in; "Add Outlook" only works where an app password is still allowed.
 * Discord scraping uses a bot **you** create and invite to your own server; nothing is posted.
+
+## Running without licensing (default until you set up a server)
+If a build has no license server address, the app runs open: no lock screen, nothing to activate. Licensing switches on
+automatically once the `LICENSE_URL` repo variable is set and the app is rebuilt (or `DT_LICENSE_URL` is set when running from source).
+All the license code stays in place.

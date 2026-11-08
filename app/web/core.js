@@ -145,7 +145,7 @@ async function pollShell() {
     const ind = $('#ind-email'); if (ind) ind.innerHTML = lv.total ? `<span class="dot ${on ? 'g' : 'r'}"></span>` : '';
     const ia = $('#ind-attention'); if (ia) ia.innerHTML = s.attention ? `<span class="badge">${s.attention}</span>` : '';
     const bn = $('#bell-n'); bn.textContent = s.unread; bn.classList.toggle('hidden', !s.unread);
-    const L = s.license; $('#who-name').textContent = L.user || 'Member'; $('#who-plan').textContent = ({ member: 'Member', pro: 'Pro', trial: 'Trial', dev: 'Developer' }[L.plan] || L.plan) + ' license';
+    const L = s.license; $('#who-name').textContent = L.user || 'Member'; $('#who-plan').textContent = L.open ? 'Open build' : ({ member: 'Member', pro: 'Pro', trial: 'Trial', dev: 'Developer' }[L.plan] || L.plan) + ' license';
     $('#avatar').innerHTML = `<svg width="38" height="38" viewBox="0 0 38 38"><defs><linearGradient id="ag" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff4d6a"/><stop offset="1" stop-color="#7c1d33"/></linearGradient></defs><rect width="38" height="38" fill="url(#ag)"/><text x="19" y="25" text-anchor="middle" font-size="18" font-weight="700" fill="#fff" font-family="Inter,Segoe UI,sans-serif">${esc((L.user || 'M')[0].toUpperCase())}</text></svg>`;
     const sig = s.unread + ':' + s.attention + ':' + lv.live + ':' + s.sync.running + ':' + s.discord.running;
     if (L.state !== 'active') showLock(); else { if (S.sig && S.sig !== sig) softRefresh(); S.sig = sig; }

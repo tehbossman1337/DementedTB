@@ -212,3 +212,5 @@ input[type=checkbox].ck:checked:after{content:"";position:absolute;left:5px;top:
 .bars2 .rv{background:linear-gradient(180deg,#5b5b78,#34344a)}.bars2 .pf{background:linear-gradient(180deg,#ee3556,#a81f39)}.bars2 .pf.neg{background:linear-gradient(180deg,#f0a050,#9a5a1f)}
 .bars2 .b:hover:after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#000;border:1px solid var(--line2);padding:4px 8px;border-radius:7px;font-size:12px;white-space:nowrap;z-index:3}
 .legend{display:flex;gap:16px;color:var(--muted);font-size:13px;margin-top:8px}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+
+.skel .sk{height:84px;border-radius:14px;background:linear-gradient(90deg,#12121a,#181822,#12121a);background-size:200% 100%;animation:shim 1.2s linear infinite;margin-bottom:14px}.skel .sk.h{height:34px;width:220px}.skel .sk.b{height:260px}@keyframes shim{to{background-position:-200% 0}}

@@ -58,15 +58,17 @@ function filteredOrders() {
 }
 
 function drawOrders() {
-  const rows = filteredOrders(); const cols = COLS.filter(c => TR.cols[c[0]]);
+  const all = filteredOrders(); const lk = [TR.q, TR.retailer, TR.status, TR.range].join('|');
+  if (TR.lk !== lk) { TR.lk = lk; TR.limit = 150; }
+  const rows = all.slice(0, TR.limit || 150); const cols = COLS.filter(c => TR.cols[c[0]]);
   const sel = TR.sel; for (const id of [...sel]) if (!TR.data.orders.some(o => o.id === id)) sel.delete(id);
   const cell = (c, o) => ({
     product: `<td class="p"><div class="pcell">${pbadge(o)}<span>${esc(o.product || '(no product)')}</span></div></td>`, order: `<td class="mono">${esc(o.order_number)}</td>`,
     price: `<td style="font-weight:600">${money(o.total)}</td>`, account: `<td class="mono">${esc(o.account || '—')}</td>`, retailer: `<td>${esc(o.retailer)}</td>`,
     status: `<td>${pill(o.status, o.status_label)}</td>`, date: `<td>${fdate(o.order_date)}</td>`, tracking: `<td class="mono">${esc(o.tracking || '—')}</td>`, qty: `<td>${o.qty}</td>`
   }[c[0]]);
-  $('#ttable').innerHTML = rows.length ? `<table class="t"><thead><tr><th style="width:34px"><input type="checkbox" class="ck" id="tall" ${rows.length && rows.every(o => sel.has(o.id)) ? 'checked' : ''}></th>${cols.map(c => `<th data-c="${c[0]}">${c[1]}<span class="ar">${TR.sort.col === c[0] ? (TR.sort.dir > 0 ? '▲' : '▼') : '⇅'}</span></th>`).join('')}</tr></thead>
-    <tbody>${rows.map(o => `<tr data-id="${o.id}" class="${sel.has(o.id) ? 'sel' : ''}"><td><input type="checkbox" class="ck" ${sel.has(o.id) ? 'checked' : ''}></td>${cols.map(c => cell(c, o)).join('')}</tr>`).join('')}</tbody></table>`
+  $('#ttable').innerHTML = rows.length ? `<table class="t"><thead><tr><th style="width:34px"><input type="checkbox" class="ck" id="tall" ${rows.length && all.every(o => sel.has(o.id)) ? 'checked' : ''}></th>${cols.map(c => `<th data-c="${c[0]}">${c[1]}<span class="ar">${TR.sort.col === c[0] ? (TR.sort.dir > 0 ? '▲' : '▼') : '⇅'}</span></th>`).join('')}</tr></thead>
+    <tbody>${rows.map(o => `<tr data-id="${o.id}" class="${sel.has(o.id) ? 'sel' : ''}"><td><input type="checkbox" class="ck" ${sel.has(o.id) ? 'checked' : ''}></td>${cols.map(c => cell(c, o)).join('')}</tr>`).join('')}</tbody></table>${all.length > rows.length ? `<div style="text-align:center;padding:14px"><button class="btn sm" id="tmore">Show more (${all.length - rows.length} more)</button></div>` : ''}`
     : `<div class="empty" style="margin:8px 0"><b>${TR.data.orders.length ? 'No orders match these filters' : 'No orders yet'}</b>${TR.data.orders.length ? 'Try a different search or filter.' : 'Connect an email account and orders appear here on their own — or add one by hand.'}
       ${TR.data.orders.length ? '' : '<br><button class="btn p" id="egoto">Connect email</button>'}</div>`;
   const g = $('#egoto'); if (g) g.onclick = () => go('email');
@@ -77,13 +79,15 @@ function drawOrders() {
     $('#bdel').onclick = async () => { if (await confirmBox(`Delete ${sel.size} order${sel.size > 1 ? 's' : ''}?`, 'They stay hidden even if their emails are scanned again. You can restore them in Settings → Deleted orders.', 'Delete', true)) { await act(() => api('/api/orders/delete', { ids: [...sel] })); sel.clear(); refreshPage(); } };
   }
   const t = $('#ttable'); if (!rows.length) return;
-  $('#tall').onclick = e => { rows.forEach(o => e.target.checked ? sel.add(o.id) : sel.delete(o.id)); drawOrders(); };
+  const mo = $('#tmore'); if (mo) mo.onclick = () => { TR.limit = (TR.limit || 150) + 300; drawOrders(); };
+  $('#tall').onclick = e => { all.forEach(o => e.target.checked ? sel.add(o.id) : sel.delete(o.id)); drawOrders(); };
   $$('th[data-c]', t).forEach(th => th.onclick = () => { const c = th.dataset.c; TR.sort = { col: c, dir: TR.sort.col === c ? -TR.sort.dir : 1 }; store.set('tr.sort', TR.sort); drawOrders(); });
-  $$('tbody tr', t).forEach(tr => tr.onclick = e => {
+  const tb = $('tbody', t); tb.onclick = e => {
+    const tr = e.target.closest('tr'); if (!tr) return;
     const id = +tr.dataset.id;
     if (e.target.classList.contains('ck')) { e.target.checked ? sel.add(id) : sel.delete(id); drawOrders(); return; }
     orderDrawer(id);
-  });
+  };
 }
 
 function orderForm(o) {

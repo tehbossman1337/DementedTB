@@ -141,12 +141,13 @@ function renderRoute() {
   $$('[data-nav]').forEach(n => n.classList.toggle('on', n.dataset.nav === S.route));
   const fn = PAGES[S.route]; const v = $('#view'); v.scrollTop = 0;
   if (S.page !== S.route && typeof vstate !== 'undefined') vstate.q = '';
+  if (S.page !== S.route || !v.querySelector('.page')) v.innerHTML = '<div class="page skel"><div class="sk h"></div><div class="sk"></div><div class="sk"></div><div class="sk b"></div></div>';
   S.page = S.route; S.tok++; runPage(fn, v);
 }
 /* Run a page; never leave the screen blank - show what went wrong (and log it) instead. */
 function runPage(fn, v) {
   const T = S.tok; S.inflight = (S.inflight || 0) + 1;
-  const slow = setTimeout(() => { if (T === S.tok && !v.querySelector('.page')) v.innerHTML = '<div class="page"><div class="empty plain" style="margin-top:20px">Still loading… <button class="btn sm" id="rl" style="margin-left:10px">Retry</button></div></div>', $('#rl').onclick = () => refreshPage(); }, 5000);
+  const slow = setTimeout(() => { if (T === S.tok && (!v.querySelector('.page') || v.querySelector('.skel'))) v.innerHTML = '<div class="page"><div class="empty plain" style="margin-top:20px">Still loading… <button class="btn sm" id="rl" style="margin-left:10px">Retry</button></div></div>', $('#rl').onclick = () => refreshPage(); }, 5000);
   Promise.resolve().then(() => fn(v)).catch(e => {
     if (T !== S.tok) return;
     clientLog('page ' + S.route + ': ' + (e && e.stack || e));

@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
-OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
+OPEN = {"/api/diag", "/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
 
 
 def get(path):
@@ -808,6 +808,21 @@ def _(c, b):
 
 @post("/api/update/install")
 def _(c, b):
+    return updater.install()
+
+
+@get("/api/diag")
+def _(c, q):
+    """Health check used by the automated update test (and handy for support): is the window talking to us, and what data is there."""
+    return {"pid": os.getpid(), "build": build_info.BUILD, "ui_ok": UI["ok"], "data": db.counts(), "data_dir": config.DATA_DIR}
+
+
+@post("/api/update/e2e_install")
+def _(c, b):
+    """Only for the automated update test on the build machine (DT_E2E=1): install a given Setup file as if it had been downloaded."""
+    if os.environ.get("DT_E2E") != "1":
+        return {"error": "not found"}
+    updater.STATE.update(phase="ready", path=str(b.get("path") or ""))
     return updater.install()
 
 

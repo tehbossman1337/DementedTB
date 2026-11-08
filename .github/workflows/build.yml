@@ -51,3 +51,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "build-${{ github.run_number }}" installer_out/DementedToolbox-Setup.exe --title "Build ${{ github.run_number }}" --notes "Automatic build ${{ github.run_number }}" --latest
+
+  update-test:
+    # Installs the new Setup on a clean Windows machine, opens the app, updates it in-app and checks it comes back with its data.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - uses: actions/download-artifact@v4
+        with:
+          name: DementedToolbox-Setup
+          path: installer_out
+      - name: Update test
+        shell: pwsh
+        run: ./tests/e2e/update_test.ps1
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-test-output
+          path: e2e_out

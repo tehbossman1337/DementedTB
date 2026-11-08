@@ -128,6 +128,8 @@ class LicenseError(Exception):
 # -------------------------------------------------------------- status
 def status(c):
     """What the UI needs: {state, user, plan, expires, hint, device_name}. state: none | active | expired | stale | invalid."""
+    if not required(c) and not os.environ.get("DT_LICENSE_BYPASS"):  # open build: nothing to look up, keep every request cheap
+        return {"state": "active", "user": "Demented", "plan": "open", "expires": None, "hint": "", "open": True, "device_name": "", "server": "", "bypass": False}
     base = {"state": "none", "device_name": device_name(c), "server": server_url(c), "bypass": bool(os.environ.get("DT_LICENSE_BYPASS"))}
     if not required(c):
         return {**base, "state": "active", "user": "Demented", "plan": "open", "expires": None, "hint": "", "open": True}

@@ -32,10 +32,10 @@ const LOGO = `<svg width="26" height="26" viewBox="0 0 40 40"><path d="M10 7h10.
 /* ---------- api */
 let locked = false;
 async function api(path, body) {
-  let r;
+  let r; const ac = new AbortController(); const to = setTimeout(() => ac.abort(), path.startsWith('/api/update') || path.includes('/export') || path.includes('/sync') ? 600000 : 45000);
   try {
-    r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  } catch (e) { throw new Error('The app is not responding. Close and reopen it.'); }
+    r = await fetch(path, body === undefined ? { signal: ac.signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
+  } catch (e) { throw new Error(e.name === 'AbortError' ? 'The app took too long to answer. Try again in a moment.' : 'The app is not responding. Close and reopen it.'); } finally { clearTimeout(to); }
   let j = {};
   try { j = await r.json(); } catch (e) { }
   if (r.status === 403 && j.locked) { showLock(); throw new Error(j.error); }
@@ -135,10 +135,24 @@ function renderRoute() {
   $$('[data-nav]').forEach(n => n.classList.toggle('on', n.dataset.nav === S.route));
   const fn = PAGES[S.route]; const v = $('#view'); v.scrollTop = 0;
   if (S.page !== S.route && typeof vstate !== 'undefined') vstate.q = '';
-  S.page = S.route; S.tok++; fn(v);
+  S.page = S.route; S.tok++; runPage(fn, v);
 }
+/* Run a page; never leave the screen blank - show what went wrong (and log it) instead. */
+function runPage(fn, v) {
+  const T = S.tok; S.inflight = (S.inflight || 0) + 1;
+  const slow = setTimeout(() => { if (T === S.tok && !v.querySelector('.page')) v.innerHTML = '<div class="page"><div class="empty plain" style="margin-top:20px">Still loading… <button class="btn sm" id="rl" style="margin-left:10px">Retry</button></div></div>', $('#rl').onclick = () => refreshPage(); }, 5000);
+  Promise.resolve().then(() => fn(v)).catch(e => {
+    if (T !== S.tok) return;
+    clientLog('page ' + S.route + ': ' + (e && e.stack || e));
+    v.innerHTML = `<div class="page"><div class="empty plain" style="margin-top:20px"><b>This page couldn't load</b>${esc(e && e.message || e)}<div style="margin-top:14px"><button class="btn sm p" id="rl">Try again</button> <button class="btn sm" id="rlog">Open the data folder</button></div></div></div>`;
+    $('#rl').onclick = () => refreshPage(); $('#rlog').onclick = () => api('/api/open_folder', {}).catch(() => { });
+  }).finally(() => { clearTimeout(slow); S.inflight = Math.max(0, (S.inflight || 1) - 1); });
+}
+function clientLog(msg) { try { fetch('/api/clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: String(msg).slice(0, 3000) }) }); } catch (e) { } }
+window.addEventListener('error', e => clientLog('js error: ' + e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+window.addEventListener('unhandledrejection', e => clientLog('promise: ' + (e.reason && e.reason.stack || e.reason)));
 const PAGES = {};
-function refreshPage() { if (PAGES[S.route]) { const v = $('#view'); const y = v.scrollTop; S.tok++; const r = PAGES[S.route](v); Promise.resolve(r).then(() => v.scrollTop = y); } }
+function refreshPage() { if (PAGES[S.route]) { const v = $('#view'); const y = v.scrollTop; S.tok++; runPage(PAGES[S.route], v); setTimeout(() => v.scrollTop = y, 250); } }
 
 async function pollShell() {
   try {
@@ -155,7 +169,7 @@ async function pollShell() {
     if (L.state !== 'active') showLock(); else { if (S.sig && S.sig !== sig) softRefresh(); S.sig = sig; }
   } catch (e) { }
 }
-function softRefresh() { const ae = document.activeElement; if (['tracking', 'attention', 'email', 'checkouts', 'servers'].includes(S.route) && $('#overlay').classList.contains('hidden') && $('#drawer').classList.contains('hidden') && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) refreshPage(); }
+function softRefresh() { if (S.inflight) return; const ae = document.activeElement; if (['tracking', 'attention', 'email', 'checkouts', 'servers'].includes(S.route) && $('#overlay').classList.contains('hidden') && $('#drawer').classList.contains('hidden') && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) refreshPage(); }
 
 async function toggleBell() {
   const p = $('#bellpanel');

@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
-OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server"}
+OPEN = {"/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
 
 
 def get(path):
@@ -641,6 +641,15 @@ def _(c, b):
     if op == "delete":
         return {"ok": True, "removed": profiles.delete_group(c, kind, str(b.get("name") or ""))}
     raise ValueError("Unknown action")
+
+@post("/api/clientlog")
+def _(c, b):
+    try:
+        open(os.path.join(config.DATA_DIR, "app.log"), "a", encoding="utf-8").write(time.strftime("%Y-%m-%d %H:%M:%S ") + "[ui] " + str(b.get("msg") or "")[:3000] + "\n")
+    except Exception:
+        pass
+    return {"ok": True}
+
 
 # ---------------------------------------------------------------- updates / misc
 @get("/api/update/check")

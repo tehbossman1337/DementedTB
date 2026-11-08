@@ -383,6 +383,7 @@ def sync_account(aid, full=False, progress=lambda m: None, announce=True):
                             msg = email.message_from_bytes(raw, policy=policy.default)
                             r = process_message(cc, mid, msg, acct["email"], excs, own, announce)
                             done.add(mid)
+                            time.sleep(0.002)  # let the window's own requests through while a big mailbox is processed
                             if r == "order":
                                 stats["orders"] += 1
                             elif r == "attention":

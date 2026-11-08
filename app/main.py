@@ -39,11 +39,6 @@ class WindowApi:
 
 def main():
     _log("starting")
-    try:
-        import faulthandler
-        faulthandler.enable(open(os.path.join(config.DATA_DIR, "crash.log"), "a"))  # native crashes leave a trace here
-    except Exception:
-        pass
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
     server.start_background()
     srv, port = server.make_server(8765)

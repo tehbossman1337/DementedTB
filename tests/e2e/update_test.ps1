@@ -40,6 +40,15 @@ $first = WaitUi "first launch" 0 90
 Shot "1-first-launch"
 if (!$first) { Dump; throw "the app's window never reached its server on a normal launch" }
 
+Write-Host "== tray icon + second launch brings the open window forward"
+if ((Get-Content "$data\app.log" -Raw) -match "tray (unavailable|failed)") { Dump; throw "tray icon did not start" }
+Start-Process $exe
+Start-Sleep 8
+$n = @(Get-Process DementedToolbox -ErrorAction SilentlyContinue).Count
+$d1 = Diag
+Write-Host "processes after second launch: $n, pid $($d1.pid)"
+if ($n -ne 1 -or $d1.pid -ne $first.pid) { Dump; throw "a second copy of the app stayed open" }
+
 Write-Host "== in-app update"
 Remove-Item Env:DT_E2E
 try { $r = Invoke-RestMethod -Method Post -ContentType "application/json" -Body (@{ path = $Setup } | ConvertTo-Json) http://127.0.0.1:8765/api/update/e2e_install -TimeoutSec 10; Write-Host "install call: $($r | ConvertTo-Json -Compress)" } catch { Write-Host "install call: $_" }

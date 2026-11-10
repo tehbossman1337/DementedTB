@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
-      - run: python -m pip install pyinstaller pywebview pythonnet cryptography
+      - run: python -m pip install pyinstaller pywebview pythonnet cryptography pystray pillow
       - name: Stamp build number, release feed and license server
         shell: pwsh
         env:
@@ -30,7 +30,7 @@ jobs:
           $extra = @()
           if (Test-Path app/dt/license_url.txt) { $extra += @("--add-data", "app/dt/license_url.txt;.") }
           if (Test-Path app/dt/license_pub.txt) { $extra += @("--add-data", "app/dt/license_pub.txt;.") }
-          python -m PyInstaller --noconfirm --windowed --onedir --name DementedToolbox --icon app/app.ico --paths app --add-data "app/web;web" @extra --collect-all webview app/main.py
+          python -m PyInstaller --noconfirm --windowed --onedir --name DementedToolbox --icon app/app.ico --paths app --add-data "app/web;web" --add-data "app/app.ico;." --hidden-import pystray._win32 @extra --collect-all webview app/main.py
       - name: Check the build produced the exe
         run: if (!(Test-Path dist/DementedToolbox/DementedToolbox.exe)) { throw "exe missing" }
       - name: Smoke-test the packaged app (starts it headless and checks its files and core code)

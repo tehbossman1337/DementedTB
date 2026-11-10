@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS name_maps(
   id INTEGER PRIMARY KEY AUTOINCREMENT, webhook_name TEXT NOT NULL UNIQUE, bot TEXT DEFAULT '', proxy_list TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS price_rules(
   id INTEGER PRIMARY KEY AUTOINCREMENT, match TEXT NOT NULL, store TEXT DEFAULT '', bot TEXT DEFAULT '', price REAL NOT NULL, created_at TEXT);
+CREATE TABLE IF NOT EXISTS retailer_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL, retailer TEXT NOT NULL, created_at TEXT, UNIQUE(kind, value));
 CREATE TABLE IF NOT EXISTS revs(name TEXT PRIMARY KEY, n INTEGER DEFAULT 0);
 INSERT OR IGNORE INTO revs VALUES('orders', 0);
 CREATE TRIGGER IF NOT EXISTS rv_orders_i AFTER INSERT ON orders BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
@@ -113,7 +114,7 @@ def connect(path=None):
             if path not in _INIT:
                 c.execute("PRAGMA journal_mode=WAL")
                 c.executescript(SCHEMA)
-                for tbl, col in (("inv_receipts", "order_id INTEGER"), ("inv_receipts", "source TEXT DEFAULT 'manual'"), ("inv_order_links", "lines TEXT DEFAULT ''")):
+                for tbl, col in (("inv_receipts", "order_id INTEGER"), ("inv_receipts", "source TEXT DEFAULT 'manual'"), ("inv_order_links", "lines TEXT DEFAULT ''"), ("attention", "body TEXT DEFAULT ''"), ("attention", "date_hdr TEXT DEFAULT ''")):
                     try:
                         c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
                     except sqlite3.OperationalError:
@@ -256,3 +257,54 @@ def restore_if_emptied():
     src.close(); dst.close()
     _INIT.discard(config.DB_PATH)
     return best
+
+
+def list_snapshots():
+    import os
+    out = []
+    for d in _backup_dirs():
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            if f.startswith("toolbox-") and f.endswith(".db"):
+                p = os.path.join(d, f)
+                parts = f[len("toolbox-"):-3].rsplit("-", 2)
+                out.append({"path": p, "name": f, "kind": parts[0] if len(parts) == 3 else "auto", "where": "Documents" if d != _backup_dirs()[0] else "App data",
+                            "time": os.path.getmtime(p), "size": os.path.getsize(p), "counts": counts(p)})
+    seen, uniq = {}, []
+    for x in sorted(out, key=lambda x: (x["where"] != "App data", -x["time"])):  # one row per snapshot; note when a second copy exists
+        if x["name"] in seen:
+            seen[x["name"]]["where"] = "App data + Documents"
+            continue
+        seen[x["name"]] = x
+        uniq.append(x)
+    return sorted(uniq, key=lambda x: -x["time"])
+
+
+def restore_snapshot(path):
+    """Put a snapshot back as the live database. The current data is saved first as a 'before-restore' snapshot, so this can be undone."""
+    import os
+    real = os.path.realpath(path or "")
+    if not any(real.startswith(os.path.realpath(d) + os.sep) for d in _backup_dirs()) or not real.endswith(".db") or not os.path.isfile(real):
+        raise ValueError("That backup file isn't one of the app's snapshots")
+    try:
+        sqlite3.connect(real).execute("SELECT COUNT(*) FROM settings").fetchone()
+    except sqlite3.Error:
+        raise ValueError("That backup file is damaged and can't be restored")
+    snapshot("before-restore")
+    c = connect()
+    keep = {k: get(c, k, None) for k in ("license_token", "license_url", "license_pub", "device_name")}  # never lock yourself out by restoring
+    c.close()
+    src, dst = sqlite3.connect(real), sqlite3.connect(config.DB_PATH, timeout=30)
+    with dst:
+        src.backup(dst)
+    src.close(); dst.close()
+    _INIT.discard(config.DB_PATH)
+    c = connect()  # re-run migrations in case the snapshot came from an older build
+    for k, v in keep.items():
+        if v is None:
+            c.execute("DELETE FROM settings WHERE key=?", (k,))
+        else:
+            c.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (k, v))
+    c.commit(); c.close()
+    return counts()

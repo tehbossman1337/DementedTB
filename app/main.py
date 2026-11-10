@@ -36,10 +36,48 @@ class WindowApi:
             pass
 
     def close(self):
+        """Title-bar X: hide to the tray when that's on (mail keeps being watched), otherwise quit."""
+        from dt import db, desktop
         try:
-            self._window.destroy()
-        finally:
-            os._exit(0)
+            c = db.connect()
+            to_tray = desktop.STATE["tray"] and desktop.settings(c)["close_to_tray"]
+            c.close()
+        except Exception:
+            to_tray = False
+        if to_tray:
+            self._window.hide()
+            if not getattr(self, "_told", False):
+                self._told = True
+                try:
+                    from dt import notify
+                    notify.toast("Still running", "Demented Toolbox keeps watching your inboxes from the tray. Right-click the tray icon to quit.")
+                except Exception:
+                    pass
+            return
+        quit_app(self._window)
+
+
+def quit_app(window=None):
+    try:
+        from dt import desktop
+        desktop.stop_tray()
+        window and window.destroy()
+    finally:
+        os._exit(0)
+
+
+def _already_running():
+    """If another copy is already up, bring its window forward and say so."""
+    import json
+    import urllib.request
+    try:
+        d = json.loads(urllib.request.urlopen("http://127.0.0.1:8765/api/diag", timeout=1.5).read())
+        if d.get("pid") and d["pid"] != os.getpid() and "data_dir" in d:
+            urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8765/api/window/show", data=b"{}", method="POST"), timeout=3).read()
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def check():
@@ -51,6 +89,12 @@ def check():
         assert inventory.lists(c)["pokemon_sets"], "inventory lists missing"
         inventory.dashboard(c)
         profiles.groups(c)
+        from dt import stats, desktop
+        stats.stick_rates(c, 90)
+        desktop.settings(c)
+        if os.name == "nt":
+            import pystray._win32  # noqa: F401  (tray icon must be bundled)
+            desktop._icon_image()
         assert os.path.isfile(os.path.join(config.WEB_DIR, "index.html")), "web files missing"
         for f in ("core.js", "pages.js", "pages2.js", "pages3.js", "pages4.js", "boot.js", "app.css"):
             assert os.path.isfile(os.path.join(config.WEB_DIR, f)), f + " missing"
@@ -81,6 +125,9 @@ def main():
     except Exception:
         pass
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
+    if "--browser" not in sys.argv and _already_running():
+        _log("already running - brought the open window forward")
+        os._exit(0)
     from dt import relaunch
     cleaner = threading.Thread(target=relaunch.clear_orphans, daemon=True)  # runs while the rest starts up
     if "--browser" not in sys.argv:
@@ -138,13 +185,33 @@ def main():
         if relaunch.spawn(relaunch.exe_path(), wait_pid=os.getpid(), kill_pid=os.getpid()):
             _log("restarting the app")
     threading.Thread(target=watchdog, daemon=True).start()
+    from dt import db as _dbm, desktop, mail as _mail
+    try:
+        _c = _dbm.connect(); dset = desktop.settings(_c); _c.close()
+    except Exception:
+        dset = dict(desktop.DEFAULTS)
+    desktop.refresh_run_key()
+    tray = desktop.start_tray(_log)
+    hide_at_start = "--autostart" in sys.argv and dset.get("start_minimized") and tray
+    if "--autostart" in sys.argv:
+        _log(f"started with Windows (minimized={bool(hide_at_start)})")
     for attempt in (1, 2):  # right after an update the previous window may still be shutting down; one calm retry fixes that
         try:
             import webview
             api = WindowApi()
             w = webview.create_window(config.APP_NAME, url, width=1280, height=820, min_size=(980, 640), frameless=True, easy_drag=False,
-                                      background_color="#0a0a0f", js_api=api)
+                                      background_color="#0a0a0f", js_api=api, minimized=bool(hide_at_start))
             api._window = w
+
+            def show(w=w):
+                try:
+                    w.show(); w.restore()
+                except Exception:
+                    pass
+            desktop.HOOKS.update(show=show, quit=lambda w=w: quit_app(w),
+                                 sync=lambda: threading.Thread(target=_mail.sync_all, daemon=True).start())
+            if hide_at_start:  # start with Windows: load the page, then tuck the window into the tray
+                w.events.loaded += lambda *a: (not getattr(api, "_hid", False)) and (setattr(api, "_hid", True), w.hide())
             for ev in ("shown", "loaded", "closing", "closed"):
                 try:
                     getattr(w.events, ev).__iadd__((lambda n: (lambda *a: _log("window " + n)))(ev))

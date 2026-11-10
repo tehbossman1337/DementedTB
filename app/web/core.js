@@ -95,12 +95,12 @@ const readText = f => new Promise((res, rej) => { const r = new FileReader(); r.
 /* ---------- state + shell */
 const S = { route: 'tracking', info: null, page: null, shell: null, tok: 0 };
 const NAV = [
-  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
+  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['stick', 'Stick rates', 'chart'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
   { id: 'arsenal', label: 'Arsenal', icon: 'target', items: [['checkouts', 'Checkouts', 'doc'], ['servers', 'Servers & channels', 'discord'], ['bots', 'Bots & proxies', 'layers'], ['rules', 'Price rules', 'doc']] },
   { id: 'inv', label: 'Inventory', icon: 'archive', items: [['inv_dash', 'Dashboard', 'chart'], ['inv_items', 'Items', 'box'], ['inv_sales', 'Sales', 'tag'], ['inv_receipts', 'Receipts', 'receipt'], ['inv_scan', 'Scan station', 'scan'], ['inv_tax', 'Tax summary', 'doc'], ['inv_settings', 'Fees & settings', 'gear']] },
   { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Accounts', 'key']] },
 ];
-const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
+const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], stick: ['Order Tracker', 'Stick rates'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
   checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], profiles: ['Profiles & Accounts', 'Profiles'], siteaccts: ['Profiles & Accounts', 'Accounts'], inv_dash: ['Inventory', 'Dashboard'], inv_items: ['Inventory', 'Items'], inv_sales: ['Inventory', 'Sales'], inv_receipts: ['Inventory', 'Receipts'], inv_scan: ['Inventory', 'Scan station'], inv_tax: ['Inventory', 'Tax summary'], inv_settings: ['Inventory', 'Fees & settings'], settings: ['Demented Toolbox', 'Settings'] };
 
 function renderShell() {

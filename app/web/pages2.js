@@ -254,6 +254,9 @@ PAGES.settings = async function (v) {
      <div class="row"><label class="tog"><span class="sw"><input type="checkbox" id="lg-h" checked><i></i></span>Hide email addresses</label><button class="btn p" id="lg-go">Export logs…</button></div></div>
    <div class="card"><h3>Backup and move to another computer</h3><p>Export everything to a single file, then import it on the new machine. Email passwords, your Discord bot token and webhook URLs are only included if you set a passphrase.</p>
      <div class="row wrap"><label class="tog"><span class="sw"><input type="checkbox" id="bk-pw"><i></i></span>Include email passwords</label><input class="inp hidden" id="bk-ph" type="password" placeholder="Passphrase (6+ characters)" style="width:260px"><button class="btn p" id="bk-ex">Export backup</button><button class="btn" id="bk-im">Import backup…</button></div></div>
+   <div class="card" id="dk-card"><h3>Windows</h3><p>Keep the app watching your inboxes in the background.</p><div id="dk"><div class="note">Loading…</div></div></div>
+   <div class="card"><div class="hd"><h3>Restore from a backup</h3><div class="r"><button class="btn sm" id="sn-make">Back up now</button></div></div><p>The app saves a copy of your data every day and before every update, in your app data folder and in Documents › Demented Toolbox › auto-backups. Restoring one replaces what's in the app now; your current data is saved first, so you can undo it.</p>
+     <div id="sn-list"><div class="note">Loading…</div></div></div>
    <div class="card"><h3>This device</h3><p>Shown to you if you sign in somewhere else. Your license can be active on one computer at a time.</p>
      <label class="f">Device name</label><div class="row"><input class="inp" id="dv-n" value="${esc(s.device_name)}"><button class="btn" id="dv-s">Save</button><button class="btn ghost" id="dv-o">Sign out</button></div>
      <div class="note" style="margin-top:10px">Signed in as ${esc(L.user)} · ${esc(L.plan)} license${L.hint ? ' …' + esc(L.hint) : ''} · expires ${exp}. Signing out keeps your tracking data on this computer.</div></div>
@@ -277,6 +280,30 @@ PAGES.settings = async function (v) {
   const pres = () => post('/api/settings/presence', { enabled: $('#pr-en').checked, counts: $('#pr-ct').checked, client_id: $('#pr-id').value });
   $('#pr-en').onchange = pres; $('#pr-ct').onchange = pres; $('#pr-id').onchange = pres;
   $('#lg-go').onclick = async e => { const r = await busy(e.currentTarget, () => post('/api/logs/export', { hide_emails: $('#lg-h').checked })); if (r) { toast('Saved to ' + r.path); api('/api/open_folder', {}); } };
+  const snaps = async () => {
+    const box = $('#sn-list'); if (!box) return;
+    const d = await api('/api/snapshots'); const kinds = { auto: 'Daily', 'pre-update': 'Before update', manual: 'Manual', 'before-restore': 'Before a restore' };
+    const sum = n => [n.mail_accounts && `${n.mail_accounts} inbox${n.mail_accounts > 1 ? 'es' : ''}`, n.orders && `${n.orders} order${n.orders > 1 ? 's' : ''}`, n.checkouts && `${n.checkouts} checkout${n.checkouts > 1 ? 's' : ''}`, n.inv_items && `${n.inv_items} item${n.inv_items > 1 ? 's' : ''}`, n.vprofiles && `${n.vprofiles} profiles`].filter(Boolean).join(' · ') || 'empty';
+    box.innerHTML = d.items.length ? `<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table class="t"><tbody>${d.items.map((x, i) => `<tr><td>${new Date(x.time * 1000).toLocaleString()}</td><td>${kinds[x.kind] || esc(x.kind)}</td><td class="muted small">${sum(x.counts)}</td><td class="muted small">${x.where}</td><td style="text-align:right"><button class="btn sm" data-sn="${i}">Restore</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="note">No backups yet. One is made automatically each day you open the app.</div>';
+    $$('[data-sn]', box).forEach(b => b.onclick = async () => {
+      const x = d.items[+b.dataset.sn];
+      if (!await confirmBox('Restore this backup?', `Everything in the app goes back to ${new Date(x.time * 1000).toLocaleString()} (${sum(x.counts)}). What's there now is saved as a "Before a restore" backup first.`, 'Restore', true)) return;
+      const r = await act(() => api('/api/snapshots/restore', { path: x.path })); if (r) { toast('Backup restored'); TR.data = null; pollShell(); refreshPage(); }
+    });
+  };
+  snaps();
+  (async () => {
+    const box = $('#dk'); if (!box) return; const k = await api('/api/desktop');
+    if (!k.windows) { box.innerHTML = '<div class="note">These options are for the Windows app.</div>'; return; }
+    const tg = (id, on, label, sub, dis) => `<label class="tog" style="margin:6px 0;${dis ? 'opacity:.5' : ''}"><span class="sw"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${dis ? 'disabled' : ''}><i></i></span><span>${label}${sub ? `<span class="note" style="display:block">${sub}</span>` : ''}</span></label>`;
+    box.innerHTML = tg('dk-sw', k.start_with_windows, 'Start with Windows', 'Opens when you sign in to Windows.') +
+      tg('dk-sm', k.start_minimized, 'Start minimized to the tray', 'When it opens with Windows, it goes straight to the tray icon.', !k.tray_available) +
+      tg('dk-ct', k.close_to_tray, 'Closing the window keeps it running in the tray', 'Right-click the tray icon and choose Quit to fully close it.', !k.tray_available) +
+      (k.tray_available ? '' : '<div class="note">The tray icon isn\'t available on this computer.</div>');
+    const save = async (key, el) => { try { await api('/api/desktop', { [key]: el.checked }); toast('Saved'); } catch (x) { el.checked = !el.checked; toast(x.message, true); } };
+    $('#dk-sw').onchange = e => save('start_with_windows', e.target); $('#dk-sm').onchange = e => save('start_minimized', e.target); $('#dk-ct').onchange = e => save('close_to_tray', e.target);
+  })();
+  $('#sn-make').onclick = async e => { if (await busy(e.currentTarget, () => act(() => api('/api/snapshots/make', {}), 'Backup saved'))) snaps(); };
   $('#bk-pw').onchange = e => $('#bk-ph').classList.toggle('hidden', !e.target.checked);
   $('#bk-ex').onclick = async e => { const r = await busy(e.currentTarget, () => post('/api/backup/export', { include_passwords: $('#bk-pw').checked, passphrase: $('#bk-ph').value })); if (r) { toast('Backup saved to ' + r.path + (r.encrypted ? ' (encrypted)' : '')); api('/api/open_folder', {}); } };
   $('#bk-im').onclick = async () => {

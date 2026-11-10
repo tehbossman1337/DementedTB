@@ -137,18 +137,34 @@ async function orderDrawer(id) {
 /* ================================================================ Needs attention */
 PAGES.attention = async function (v) {
   const T = S.tok;
-  const items = await api('/api/attention');
+  const [items, R] = await Promise.all([api('/api/attention'), api('/api/attention/rules')]);
   if (T !== S.tok) return;
+  const rulesCard = `<div class="card" style="margin-top:22px"><div class="hd"><h3>Sender rules</h3><div class="r"><button class="btn sm" id="ru-add">Add rule</button></div></div>
+     <p class="small muted" style="margin:0 0 10px">Emails from these senders are always read as that retailer, so they stop landing here.</p>
+     ${R.rules.length ? `<table class="t"><tbody>${R.rules.map(r => `<tr><td>${r.kind === 'domain' ? 'Anything from' : 'Emails from'} <b>${esc(r.value)}</b></td><td>→ ${esc(r.retailer)}</td><td style="text-align:right"><button class="btn sm ghost" data-rdel="${r.id}">Remove</button></td></tr>`).join('')}</tbody></table>` : '<div class="note">No rules yet. Use “Always treat as…” on an email above, or add one here.</div>'}</div>`;
   v.innerHTML = `<div class="page"><div class="ph"><div><h1>Needs attention</h1><p>Emails that look like orders but need a quick decision before they are added.</p></div></div>
    ${items.length ? items.map(a => `<div class="card" data-id="${a.id}"><div class="row"><div style="flex:1;min-width:0"><div class="t" style="font-weight:600;font-size:16px">${esc(a.subject || '(no subject)')}</div>
      <div class="muted small" style="margin-top:3px">${esc(a.sender)} · ${fdt(a.created_at)}${a.guess ? ` · looks like ${esc(a.guess)}` : ''}</div></div><span class="pill"><i style="background:var(--amber)"></i>${esc(a.reason)}</span></div>
      <p class="small muted" style="margin:12px 0;white-space:pre-wrap;line-height:1.5">${esc((a.snippet || '').slice(0, 300))}</p>
-     <div class="row wrap"><button class="btn p sm" data-add>Add as order</button><button class="btn sm" data-ign="sender">Ignore this sender</button><button class="btn sm" data-ign="domain">Ignore this website</button><button class="btn sm ghost" data-dis>Dismiss</button></div></div>`).join('')
-     : '<div class="empty plain">Nothing needs your attention.</div>'}</div>`;
+     <div class="row wrap"><button class="btn p sm" data-add>Add as order</button><button class="btn sm" data-rule>Always treat as…</button><button class="btn sm" data-ign="sender">Ignore this sender</button><button class="btn sm" data-ign="domain">Ignore this website</button><button class="btn sm ghost" data-dis>Dismiss</button></div></div>`).join('')
+     : '<div class="empty plain">Nothing needs your attention.</div>'}${rulesCard}</div>`;
+  const ruleModal = a => modal(`<h2>Always treat as a retailer</h2><p>${a ? `Emails from <b>${esc(a.sender)}</b>` : 'Emails from a sender or website'} will be read as the retailer you pick. Waiting emails it covers are re-read right away.</p>
+     ${a ? '' : fi('ru-v', 'Email address or website', '', 'text', 'orders@shop.example.com or shop.example.com')}
+     <div class="fld"><label class="f">Applies to</label><select class="sel" id="ru-k"><option value="sender">This exact sender</option><option value="domain">Everything from this website</option></select></div>
+     <div class="fld"><label class="f">Retailer</label><input class="inp" id="ru-r" list="ru-list" value="${esc(a && a.guess || '')}" placeholder="e.g. Target"><datalist id="ru-list">${R.retailers.map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
+     <div class="note hidden" id="ru-e" style="color:var(--red)"></div>
+     <div class="mfoot"><button class="btn" data-close>Cancel</button><button class="btn p" id="ru-s">Save rule</button></div>`, {
+     onMount: m => $('#ru-s', m).onclick = async () => {
+       try { const r = await api('/api/attention/rule', { attention_id: a && a.id, value: a ? '' : $('#ru-v', m).value, kind: $('#ru-k', m).value, retailer: $('#ru-r', m).value });
+         closeModal(); toast(`Rule saved${r.orders ? ` · ${r.orders} email${r.orders > 1 ? 's' : ''} added as orders` : ''}${r.on_backfill ? ` · ${r.on_backfill} older email${r.on_backfill > 1 ? 's' : ''} will be read on the next Backfill` : ''}`); pollShell(); refreshPage(); }
+       catch (x) { $('#ru-e', m).textContent = x.message; $('#ru-e', m).classList.remove('hidden'); } } });
+  $('#ru-add').onclick = () => ruleModal(null);
+  $$('[data-rdel]', v).forEach(b => b.onclick = async () => { await act(() => api('/api/attention/rules/delete', { id: +b.dataset.rdel }), 'Rule removed'); refreshPage(); });
   $$('[data-id]', v).forEach(card => {
     const a = items.find(x => x.id == card.dataset.id), done = async (fn, m) => { if (await act(fn, m)) { pollShell(); refreshPage(); } };
     $('[data-dis]', card).onclick = () => done(() => api('/api/attention/resolve', { id: a.id }));
-    $$('[data-ign]', card).forEach(b => b.onclick = () => done(() => api('/api/attention/resolve', { id: a.id, ignore: b.dataset.ign }), 'Ignored from now on'));
+    $$('[data-ign]', card).forEach(b => b.onclick = async () => { const r = await act(() => api('/api/attention/resolve', { id: a.id, ignore: b.dataset.ign })); if (r) { toast(r.resolved > 1 ? `Ignored from now on · cleared ${r.resolved} waiting emails` : 'Ignored from now on'); pollShell(); refreshPage(); } });
+    $('[data-rule]', card).onclick = () => ruleModal(a);
     $('[data-add]', card).onclick = async () => {
       TR.data = TR.data || await loadTracking();
       const m = (a.snippet + ' ' + a.subject).match(/(?:order|#)\s*#?\s*([A-Z0-9][A-Z0-9-]{5,24})/i);
@@ -271,4 +287,31 @@ PAGES.webhooks = async function (v) {
     if (k.dataset.a === 'en') { await act(() => api('/api/webhooks/save', { ...w, url: '', enabled: k.checked })); refreshPage(); }
     if (k.dataset.a === 'rm' && await confirmBox('Delete this webhook?', 'Nothing more is sent to it.', 'Delete', true)) { await act(() => api('/api/webhooks/delete', { id: w.id })); refreshPage(); }
   });
+};
+
+/* ================================================================ Stick rates */
+const SR = { days: '90', retailer: '' };
+PAGES.stick = async function (v) {
+  const T = S.tok;
+  const d = await api(`/api/stats/stick?days=${SR.days === 'all' ? 0 : SR.days}&retailer=${encodeURIComponent(SR.retailer)}`);
+  if (T !== S.tok) return;
+  const pct = r => r == null ? '—' : Math.round(r * 100) + '%';
+  const tone = r => r == null ? '' : r < 0.5 ? 'red' : r < 0.8 ? 'amber' : 'green';
+  const table = (title, rows, label, empty) => `<div class="card"><div class="hd"><h3>${title}</h3><div class="r"><span class="note">${rows.length} ${label}</span></div></div>
+    ${rows.length ? `<div class="tbl-wrap"><table class="t"><thead><tr><th>${label[0].toUpperCase() + label.slice(1, -1)}</th><th style="width:34%">Stick rate</th><th>Orders</th><th>Stuck</th><th>Cancelled</th><th>Delivered</th><th>Spent (kept)</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td class="p">${esc(r.key)}</td><td><div class="srbar"><i class="${tone(r.rate)}" style="width:${Math.round((r.rate || 0) * 100)}%"></i></div><b class="srv ${tone(r.rate)}">${pct(r.rate)}</b></td><td>${r.total}</td><td>${r.stuck}</td><td class="${r.cancelled ? 'red' : ''}">${r.cancelled}</td><td>${r.delivered}</td><td>${money(r.spent)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="note">${empty}</div>`}</div>`;
+  const o = d.overall;
+  v.innerHTML = `<div class="page"><div class="ph"><div><h1>Stick rates</h1><p>How many orders survive without being cancelled, by the email, profile and card they were placed with.</p></div></div>
+    <div class="filters"><div class="chips" id="sr-d">${[['30', '30 days'], ['90', '90 days'], ['365', '1 year'], ['all', 'All time']].map(([k, l]) => `<button data-d="${k}" class="${SR.days === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <select class="sel" id="sr-r" style="width:200px"><option value="">All retailers</option>${d.retailer_list.map(r => `<option ${SR.retailer === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
+    <div class="stats"><div class="stat"><div class="k"><span class="dot g"></span>Overall stick rate</div><div class="v ${tone(o.rate) === 'red' ? 'red' : ''}">${pct(o.rate)}</div><div class="d">${o.stuck} of ${o.total} orders kept</div></div>
+      <div class="stat"><div class="k"><span class="dot b"></span>Email accounts</div><div class="v">${d.accounts.length}</div><div class="d">with orders in this period</div></div>
+      <div class="stat"><div class="k"><span class="dot a"></span>Profiles</div><div class="v">${d.profiles.length}</div><div class="d">${o.unassigned ? `${o.unassigned} order${o.unassigned > 1 ? 's' : ''} not tied to a profile` : 'every order tied to a profile'}</div></div>
+      <div class="stat"><div class="k"><span class="dot r"></span>Cards</div><div class="v">${d.cards.length}</div><div class="d">from your saved profiles</div></div></div>
+    ${table('By email account', d.accounts, 'accounts', 'No orders in this period.')}
+    ${table('By profile', d.profiles, 'profiles', 'No orders tied to a profile yet. Orders are tied through a matched bot checkout, or when a saved profile uses the same email as the order.')}
+    ${table('By card', d.cards, 'cards', 'No cards yet. Cards come from the profiles saved under Profiles & Accounts.')}
+    ${table('By retailer', d.retailers, 'retailers', 'No orders in this period.')}</div>`;
+  $('#sr-d').onclick = e => { const b = e.target.closest('[data-d]'); if (!b) return; SR.days = b.dataset.d; refreshPage(); };
+  $('#sr-r').onchange = e => { SR.retailer = e.target.value; refreshPage(); };
 };

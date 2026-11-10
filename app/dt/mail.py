@@ -237,16 +237,19 @@ def process_message(c, mid, msg, mailbox, excs, own, announce=True):
         return "ignored"
     body = body_text(msg)
     extra = f"{msg.get('Reply-To', '')}\n{subject}\n{body[:800]}"
-    ev, why = parsers.parse_email(sender, subject, body, msg.get("Date"), extra=extra)
+    forced = rule_retailer(db.rows(c, "SELECT * FROM retailer_rules"), sender)
+    ev, why = parsers.parse_email(sender, subject, body, msg.get("Date"), extra=extra, default=forced)
+    if ev and forced:
+        ev["retailer"] = forced  # your rule wins over the app's guess
     if ev:
         outcome, oid = orders.apply_event(c, ev, account=recipient(msg, mailbox), announce=announce)
         c.execute("INSERT OR REPLACE INTO processed VALUES(?,?,?,?,?)", (mid, mailbox, ev["retailer"], outcome, db.now()))
         return "order"
-    looks = bool(RETAIL_SENDER.search(sender + (msg.get("Reply-To") or "")) or re.search(r"\border\b", subject, re.I)) and bool(ORDER_WORDS.search(subject))
+    looks = bool(RETAIL_SENDER.search(sender + (msg.get("Reply-To") or "")) or forced or re.search(r"\border\b", subject, re.I)) and bool(ORDER_WORDS.search(subject))
     if looks and why != "unknown retailer" or (looks and RETAIL_SENDER.search(sender)):
         guess = parsers.detect_retailer(sender, extra) or ""
-        c.execute("INSERT OR IGNORE INTO attention(message_id,account,sender,subject,reason,snippet,guess,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                  (mid, mailbox, sender[:200], subject[:200], why, body[:400], guess, db.now()))
+        c.execute("INSERT OR IGNORE INTO attention(message_id,account,sender,subject,reason,snippet,guess,created_at,body,date_hdr) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  (mid, mailbox, sender[:200], subject[:200], why, body[:400], guess, db.now(), body[:30000], str(msg.get("Date") or "")))
         c.execute("INSERT OR REPLACE INTO processed VALUES(?,?,?,?,?)", (mid, mailbox, guess, "needs attention: " + why, db.now()))
         notify.notify(c, "attention", "An email needs your attention", subject[:120], link="attention", dedupe=f"att:{mid}")
         return "attention"
@@ -320,6 +323,7 @@ def sync_account(aid, full=False, progress=lambda m: None, announce=True):
         except ValueError:
             days = 180
         done = set(r[0] for r in c.execute("SELECT message_id FROM processed"))
+        rules = db.rows(c, "SELECT * FROM retailer_rules")
     finally:
         c.close()
     M = None
@@ -359,7 +363,7 @@ def sync_account(aid, full=False, progress=lambda m: None, announce=True):
                     mid = (h.get("Message-ID") or f"{acct['email']}:{folder}:{validity}:{u}").strip()
                     if mid in done and not full:
                         continue
-                    if RETAIL_SENDER.search(sender + (h.get("Reply-To") or "")) or ORDER_WORDS.search(subject):
+                    if RETAIL_SENDER.search(sender + (h.get("Reply-To") or "")) or ORDER_WORDS.search(subject) or rule_retailer(rules, sender):
                         cand.append((_msg_ts(h), u, mid))
                     else:
                         skip.append((mid, acct["email"], "", "not an order", db.now()))
@@ -591,9 +595,71 @@ def list_attention(c):
 def resolve_attention(c, aid, ignore=None):
     r = c.execute("SELECT * FROM attention WHERE id=?", (aid,)).fetchone()
     if not r:
-        return
+        return 0
+    n = 1
     if ignore in ("sender", "domain"):
         addr = parseaddr(r["sender"])[1].lower()
         orders.add_exception(c, ignore, addr if ignore == "sender" else addr.rsplit("@", 1)[-1])
+        excs = db.rows(c, "SELECT * FROM exceptions")
+        others = [x["id"] for x in c.execute("SELECT id, sender, subject FROM attention WHERE resolved=0 AND id<>?", (aid,)) if orders.is_excepted(excs, x["sender"], x["subject"])]
+        c.executemany("UPDATE attention SET resolved=1 WHERE id=?", [(i,) for i in others])
+        n += len(others)
     c.execute("UPDATE attention SET resolved=1 WHERE id=?", (aid,))
+    c.commit()
+    return n
+
+
+# ---------------------------------------------------------------- retailer rules ("always treat this sender as …")
+def _rule_key(kind, sender):
+    addr = parseaddr(sender or "")[1].lower() or (sender or "").lower().strip()
+    return addr if kind == "sender" else addr.rsplit("@", 1)[-1]
+
+
+def rule_retailer(rules, sender):
+    if not rules:
+        return None
+    addr = _rule_key("sender", sender)
+    dom = addr.rsplit("@", 1)[-1]
+    for r in rules:
+        if (r["kind"] == "sender" and r["value"] == addr) or (r["kind"] == "domain" and (dom == r["value"] or dom.endswith("." + r["value"]))):
+            return r["retailer"]
+    return None
+
+
+def list_rules(c):
+    return db.rows(c, "SELECT * FROM retailer_rules ORDER BY id DESC")
+
+
+def add_rule(c, kind, value, retailer, announce=True):
+    """Save the rule, then re-read every waiting email it covers. Emails saved before this feature have no stored text: those are released
+    so the next Backfill reads them again."""
+    kind, retailer = (kind or "sender").strip(), (retailer or "").strip()
+    value = _rule_key(kind, value) if "@" in (value or "") else (value or "").strip().lower()
+    if kind not in ("sender", "domain") or not value or not retailer:
+        raise ValueError("Pick a retailer and a sender or website")
+    c.execute("INSERT OR REPLACE INTO retailer_rules(kind,value,retailer,created_at) VALUES(?,?,?,?)", (kind, value, retailer[:60], db.now()))
+    rules = list_rules(c)
+    added = later = 0
+    for a in db.rows(c, "SELECT * FROM attention WHERE resolved=0"):
+        if rule_retailer(rules, a["sender"]) != retailer:
+            continue
+        if not a.get("body"):
+            c.execute("DELETE FROM processed WHERE message_id=?", (a["message_id"],))
+            later += 1
+            continue
+        ev, why = parsers.parse_email(a["sender"], a["subject"], a["body"], a.get("date_hdr") or None, extra=a["subject"], default=retailer)
+        if ev:
+            ev["retailer"] = retailer
+            outcome, _ = orders.apply_event(c, ev, account=a["account"], announce=announce)
+            c.execute("INSERT OR REPLACE INTO processed VALUES(?,?,?,?,?)", (a["message_id"], a["account"], retailer, outcome, db.now()))
+            c.execute("UPDATE attention SET resolved=1 WHERE id=?", (a["id"],))
+            added += 1
+        else:
+            c.execute("UPDATE attention SET reason=? WHERE id=?", (why, a["id"]))
+    c.commit()
+    return {"orders": added, "on_backfill": later}
+
+
+def delete_rule(c, rid):
+    c.execute("DELETE FROM retailer_rules WHERE id=?", (rid,))
     c.commit()

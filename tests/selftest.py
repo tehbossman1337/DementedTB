@@ -510,5 +510,39 @@ import ast as _ast
 _mt = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "main.py")).read()
 check("js_api object exposes no public window attribute (pywebview would walk native objects)", "self.window" not in _mt and "api.window" not in _mt)
 
+# sender rules, stick rates, snapshot restore
+import email as _em
+from email import policy as _pol
+from dt import mail as _ml, stats as _st, db as _d3, orders as _o3
+_c3 = _d3.connect()
+_raw = "From: Shop Orders <orders@weird-shop.example>\r\nSubject: Your order is confirmed\r\nDate: Mon, 09 Nov 2026 10:00:00 +0000\r\nMessage-ID: <rule1@x>\r\n\r\nThanks! Order number: WS123456\r\nTotal: $25.00\r\n"
+_msg = _em.message_from_string(_raw, policy=_pol.default)
+_c3.execute("INSERT INTO attention(message_id,account,sender,subject,reason,snippet,guess,created_at,body,date_hdr) VALUES('<rule1@x>','me@icloud.com','Shop Orders <orders@weird-shop.example>','Your order is confirmed','unknown retailer','','',?,?,?)",
+             (_d3.now(), "Thanks! Order number: WS123456\nTotal: $25.00", "Mon, 09 Nov 2026 10:00:00 +0000")); _c3.commit()
+_aid = _c3.execute("SELECT id FROM attention WHERE message_id='<rule1@x>'").fetchone()
+_rr = _ml.add_rule(_c3, "domain", "orders@weird-shop.example", "Weird Shop", announce=False)
+check("rule re-reads the waiting email into an order", _rr["orders"] == 1 and _c3.execute("SELECT retailer FROM orders WHERE order_number='WS123456'").fetchone()[0] == "Weird Shop", _rr)
+check("rule resolves the attention item", _c3.execute("SELECT resolved FROM attention WHERE id=?", (_aid[0],)).fetchone()[0] == 1)
+_msg2 = _em.message_from_string(_raw.replace("rule1", "rule2").replace("WS123456", "WS999999").replace("orders@", "shipping@"), policy=_pol.default)
+check("future emails from that website follow the rule", _ml.process_message(_c3, "<rule2@x>", _msg2, "me@icloud.com", [], set(), announce=False) == "order"
+      and _c3.execute("SELECT retailer FROM orders WHERE order_number='WS999999'").fetchone()[0] == "Weird Shop")
+check("rule listed and removable", len(_ml.list_rules(_c3)) == 1 and (_ml.delete_rule(_c3, _ml.list_rules(_c3)[0]["id"]) or True) and not _ml.list_rules(_c3))
+_c3.execute("INSERT INTO vprofiles(id,site,name,email,data) VALUES('p1','valor','Jig1','me@icloud.com',?)", (json.dumps({"card": {"number": "4111111111111111"}}),)); _c3.commit()
+_o3.set_status(_c3, [_c3.execute("SELECT id FROM orders WHERE order_number='WS999999'").fetchone()[0]], "cancelled")
+_s = _st.stick_rates(_c3, 0, "Weird Shop")
+_acc = [a for a in _s["accounts"] if a["key"] == "me@icloud.com"][0]
+check("stick rate by email account", _acc["total"] == 2 and _acc["stuck"] == 1 and _acc["rate"] == 0.5, _acc)
+check("stick rate by profile and card (via profile email)", _s["profiles"] and _s["profiles"][0]["key"] == "Jig1" and _s["cards"] and _s["cards"][0]["key"] == "Visa ···· 1111")
+_snp = _d3.snapshot("selftest2")
+_d3.wipe_tables(_c3, ["orders"]); _c3 = _d3.connect()
+check("orders gone before restore", _d3.counts()["orders"] == 0)
+check("restore brings snapshot back", _d3.restore_snapshot(_snp[0])["orders"] > 0)
+try:
+    _d3.restore_snapshot("/etc/passwd"); _bad = False
+except ValueError:
+    _bad = True
+check("restore refuses foreign paths", _bad)
+check("snapshots listed", any(x["kind"] == "before-restore" for x in _d3.list_snapshots()))
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

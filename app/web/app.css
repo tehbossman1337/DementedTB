@@ -214,3 +214,5 @@ input[type=checkbox].ck:checked:after{content:"";position:absolute;left:5px;top:
 .legend{display:flex;gap:16px;color:var(--muted);font-size:13px;margin-top:8px}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
 
 .skel .sk{height:84px;border-radius:14px;background:linear-gradient(90deg,#12121a,#181822,#12121a);background-size:200% 100%;animation:shim 1.2s linear infinite;margin-bottom:14px}.skel .sk.h{height:34px;width:220px}.skel .sk.b{height:260px}@keyframes shim{to{background-position:-200% 0}}
+
+.srbar{display:inline-block;vertical-align:middle;width:calc(100% - 52px);height:8px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden;margin-right:10px}.srbar i{display:block;height:100%;border-radius:6px;background:var(--green)}.srbar i.amber{background:var(--amber)}.srbar i.red{background:var(--red)}.srv{font-size:13px}.srv.red,td.red{color:var(--red)}.srv.amber{color:var(--amber)}.srv.green{color:var(--green)}

@@ -10,10 +10,10 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import (arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
+from . import (stats, desktop, arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
-OPEN = {"/api/diag", "/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
+OPEN = {"/api/window/show", "/api/diag", "/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
 
 
 def get(path):
@@ -116,6 +116,50 @@ def _(c, q):
     return Raw(_TRACK["body"])
 
 
+@get("/api/stats/stick")
+def _(c, q):
+    return stats.stick_rates(c, int((q.get("days") or ["0"])[0] or 0), (q.get("retailer") or [""])[0])
+
+
+@get("/api/desktop")
+def _(c, q):
+    return desktop.settings(c)
+
+
+@post("/api/desktop")
+def _(c, b):
+    return desktop.save(c, b)
+
+
+@post("/api/window/show")
+def _(c, b):
+    """A second copy of the app was opened: bring this one's window forward instead."""
+    if desktop.HOOKS["show"]:
+        desktop.HOOKS["show"]()
+    return {"ok": True}
+
+
+@get("/api/snapshots")
+def _(c, q):
+    return {"items": db.list_snapshots()}
+
+
+@post("/api/snapshots/make")
+def _(c, b):
+    made = db.snapshot("manual")
+    if not made:
+        raise ValueError("There's nothing to back up yet")
+    return {"ok": True, "made": len(made)}
+
+
+@post("/api/snapshots/restore")
+def _(c, b):
+    with mail.DBLOCK:
+        n = db.restore_snapshot(b.get("path"))
+    _TRACK["v"] = None
+    return {"ok": True, "counts": n}
+
+
 @get("/api/orders/detail")
 def _(c, q):
     return orders.order_detail(c, int(q["id"][0]))
@@ -155,10 +199,32 @@ def _(c, q):
     return mail.list_attention(c)
 
 
+@get("/api/attention/rules")
+def _(c, q):
+    return {"rules": mail.list_rules(c), "retailers": sorted(parsers.RETAILERS)}
+
+
+@post("/api/attention/rule")
+def _(c, b):
+    if b.get("attention_id"):
+        a = c.execute("SELECT sender FROM attention WHERE id=?", (int(b["attention_id"]),)).fetchone()
+        if not a:
+            raise ValueError("That email is no longer waiting")
+        value = a["sender"]
+    else:
+        value = b.get("value") or ""
+    return {"ok": True, **mail.add_rule(c, b.get("kind") or "sender", value, b.get("retailer"))}
+
+
+@post("/api/attention/rules/delete")
+def _(c, b):
+    mail.delete_rule(c, int(b["id"]))
+    return {"ok": True}
+
+
 @post("/api/attention/resolve")
 def _(c, b):
-    mail.resolve_attention(c, int(b["id"]), b.get("ignore"))
-    return {"ok": True}
+    return {"ok": True, "resolved": mail.resolve_attention(c, int(b["id"]), b.get("ignore"))}
 
 
 @post("/api/attention/add")

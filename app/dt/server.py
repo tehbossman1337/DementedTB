@@ -93,11 +93,27 @@ def _(c, q):
 
 
 # ---------------------------------------------------------------- tracking
+class Raw(bytes):
+    """Already-encoded JSON (sent as is)."""
+
+
+_TRACK = {"v": None, "body": b""}
+
+
 @get("/api/tracking")
 def _(c, q):
-    o = orders.list_orders(c)
-    return {"orders": o, "overview": orders.overview(c, o), "statuses": parsers.STATUS_LABEL, "colors": parsers.RETAILER_COLORS,
-            "retailers": sorted(set(parsers.RETAILERS) | {x["retailer"] for x in o})}
+    # The order list is the biggest payload in the app. Build it once per change (a trigger bumps the revision) and let the page skip it
+    # entirely when it already has this revision.
+    from datetime import date
+    v = f"{db.rev(c)}-{date.today().isoformat()}"
+    if (q.get("v") or [""])[0] == v:
+        return {"same": True, "v": v}
+    if _TRACK["v"] != v:
+        o = orders.list_orders(c)
+        _TRACK["body"] = json.dumps({"v": v, "orders": o, "overview": orders.overview(c, o), "statuses": parsers.STATUS_LABEL, "colors": parsers.RETAILER_COLORS,
+                                     "retailers": sorted(set(parsers.RETAILERS) | {x["retailer"] for x in o})}).encode()
+        _TRACK["v"] = v
+    return Raw(_TRACK["body"])
 
 
 @get("/api/orders/detail")
@@ -879,7 +895,7 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send(self, obj, code=200):
-        self._write(json.dumps(obj).encode(), "application/json", code)
+        self._write(obj if isinstance(obj, Raw) else json.dumps(obj).encode(), "application/json", code)
 
     def _crash(self):
         import traceback
@@ -973,6 +989,13 @@ def make_server(port=8765):
     raise RuntimeError("No free port found")
 
 
-def start_background():
-    for fn in (mail.live_loop, discord.poll_loop, delivery.poll_loop, presence.loop, lic.refresh_loop):
-        threading.Thread(target=fn, daemon=True).start()
+def start_background(delay=2.5):
+    """Mail, Discord, carrier and presence loops start a moment after launch so the window gets the first paint to itself."""
+    def go():
+        for fn in (mail.live_loop, discord.poll_loop, delivery.poll_loop, presence.loop, lic.refresh_loop):
+            threading.Thread(target=fn, daemon=True).start()
+    if not delay:
+        return go()
+    t = threading.Timer(delay, go)
+    t.daemon = True
+    t.start()

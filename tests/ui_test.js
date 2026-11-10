@@ -21,8 +21,8 @@ let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log('FAIL:', m)
   await p.screenshot({ path: OUT + '/tracking.png' });
   ok(await p.locator('#ttable tbody tr').count() === 5, 'five orders listed');
   await p.click('#tstat [data-s="shipped"]'); ok(await p.locator('#ttable tbody tr').count() === 1, 'status filter');
-  await p.click('#tstat [data-s="all"]'); await p.fill('#tq', 'P0041359056'); ok(await p.locator('#ttable tbody tr').count() === 1, 'search');
-  await p.fill('#tq', ''); await p.click('#tcols'); await p.click('.menu button:has-text("Tracking")'); ok(await p.locator('#ttable th', { hasText: 'Tracking' }).count() === 1, 'column picker');
+  await p.click('#tstat [data-s="all"]'); await p.fill('#tq', 'P0041359056'); await p.waitForTimeout(300); ok(await p.locator('#ttable tbody tr').count() === 1, 'search');
+  await p.fill('#tq', ''); await p.waitForTimeout(300); await p.click('#tcols'); await p.click('.menu button:has-text("Tracking")'); ok(await p.locator('#ttable th', { hasText: 'Tracking' }).count() === 1, 'column picker');
   await p.keyboard.press('Escape'); await p.click('#ttable th[data-c="price"]'); 
   await p.locator('#ttable tbody tr').first().click(); await p.waitForSelector('#drawer:not(.hidden) .tl'); await p.screenshot({ path: OUT + '/order-drawer.png' }); await p.keyboard.press('Escape');
   await p.click('#tadd'); await p.fill('#fr', 'Best Buy'); await p.fill('#fn', 'BBY-777777'); await p.fill('#fp', 'Manual thing'); await p.fill('#ft', '12.5'); await p.click('#fsave');

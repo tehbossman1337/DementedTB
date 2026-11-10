@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS name_maps(
   id INTEGER PRIMARY KEY AUTOINCREMENT, webhook_name TEXT NOT NULL UNIQUE, bot TEXT DEFAULT '', proxy_list TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS price_rules(
   id INTEGER PRIMARY KEY AUTOINCREMENT, match TEXT NOT NULL, store TEXT DEFAULT '', bot TEXT DEFAULT '', price REAL NOT NULL, created_at TEXT);
+CREATE TABLE IF NOT EXISTS revs(name TEXT PRIMARY KEY, n INTEGER DEFAULT 0);
+INSERT OR IGNORE INTO revs VALUES('orders', 0);
+CREATE TRIGGER IF NOT EXISTS rv_orders_i AFTER INSERT ON orders BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
+CREATE TRIGGER IF NOT EXISTS rv_orders_u AFTER UPDATE ON orders BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
+CREATE TRIGGER IF NOT EXISTS rv_orders_d AFTER DELETE ON orders BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
+CREATE TRIGGER IF NOT EXISTS rv_order_items_i AFTER INSERT ON order_items BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
+CREATE TRIGGER IF NOT EXISTS rv_order_items_u AFTER UPDATE ON order_items BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
+CREATE TRIGGER IF NOT EXISTS rv_order_items_d AFTER DELETE ON order_items BEGIN UPDATE revs SET n=n+1 WHERE name='orders'; END;
 """
 
 _INIT = set()
@@ -113,6 +121,12 @@ def connect(path=None):
                 c.commit()
                 _INIT.add(path)
     return c
+
+
+def rev(c, name="orders"):
+    """Bumped by triggers on every change to those tables: lets the server reuse a page's data until something actually changed."""
+    r = c.execute("SELECT n FROM revs WHERE name=?", (name,)).fetchone()
+    return r[0] if r else 0
 
 
 def get(c, key, default=""):

@@ -81,6 +81,10 @@ def main():
     except Exception:
         pass
     sys.excepthook = lambda *a: _log("unhandled:\n" + "".join(traceback.format_exception(*a)))
+    from dt import relaunch
+    cleaner = threading.Thread(target=relaunch.clear_orphans, daemon=True)  # runs while the rest starts up
+    if "--browser" not in sys.argv:
+        cleaner.start()
     try:  # safety net: remember what is in the database, bring a snapshot back if it was emptied by accident
         from dt import db as _db
         _db.connect().close()
@@ -89,8 +93,11 @@ def main():
         back = _db.restore_if_emptied()
         if back:
             _log("database was empty - restored from " + back)
-        else:
-            _db.snapshot("auto")
+        else:  # one copy a day is plenty; taken in the background so it never delays the window
+            import glob as _g
+            today = time.strftime("%Y%m%d")
+            if not _g.glob(os.path.join(config.DATA_DIR, "backups", f"toolbox-auto-{today}-*.db")):
+                threading.Thread(target=_db.snapshot, args=("auto",), daemon=True).start()
     except Exception:
         _log("safety net failed:\n" + traceback.format_exc())
     server.start_background()
@@ -108,11 +115,10 @@ def main():
         webbrowser.open(url)
         while True:
             time.sleep(3600)
-    from dt import relaunch
     flag = os.path.join(config.DATA_DIR, "retry.flag")
     retried = os.path.isfile(flag) and time.time() - os.path.getmtime(flag) < 180
     _log(f"started pid={os.getpid()} port={port} frozen={getattr(sys, 'frozen', False)} retried={retried}")
-    relaunch.clear_orphans()
+    cleaner.join(timeout=6)
 
     def watchdog():  # the window opened but never managed to talk to the server (seen right after an update): restart once, cleanly
         time.sleep(45)

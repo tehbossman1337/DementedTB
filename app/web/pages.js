@@ -7,9 +7,14 @@ const pbadge = (o) => o.image ? `<div class="pb"><img src="${esc(o.image)}"></di
 const COLS = [['product', 'Product', 1], ['order', 'Order #', 1], ['price', 'Price', 1], ['account', 'Account', 1], ['retailer', 'Retailer', 1], ['status', 'Status', 1], ['date', 'Date', 0], ['tracking', 'Tracking', 0], ['qty', 'Qty', 0]];
 const TR = { q: '', retailer: '', range: 'all', status: 'all', sort: store.get('tr.sort', { col: 'date', dir: -1 }), sel: new Set(), cols: store.get('tr.cols', Object.fromEntries(COLS.map(c => [c[0], !!c[2]]))), data: null };
 
+async function loadTracking() {  // reuses the last copy when the server says nothing changed
+  const r = await api('/api/tracking' + (TR.data && TR.data.v ? '?v=' + encodeURIComponent(TR.data.v) : ''));
+  if (!r.same) { r.orders.forEach(o => o._h = [o.order_number, o.tracking, o.product, o.account, o.retailer, ...o.items.map(i => i.name)].join(' ').toLowerCase()); TR.data = r; }
+  return TR.data;
+}
 PAGES.tracking = async function (v) {
   const T = S.tok;
-  TR.data = await api('/api/tracking');
+  await loadTracking();
   if (T !== S.tok) return;
   const d = TR.data, ov = d.overview;
   const max = Math.max(1, ...ov.days.map(x => x.spent));
@@ -38,7 +43,7 @@ PAGES.tracking = async function (v) {
    <div class="chips" id="tstat" style="margin-bottom:18px">${[['all', 'All'], ['placed', 'Placed'], ['shipped', 'Shipped'], ['out_for_delivery', 'Out for delivery'], ['delivered', 'Delivered'], ['cancelled', 'Cancelled'], ['partially_cancelled', 'Partially cancelled'], ['refunded', 'Refunded']].map(([k, l]) => `<button data-s="${k}" class="${TR.status === k ? 'on' : ''}">${l}</button>`).join('')}</div>
    <div class="card"><div class="hd"><h3>Recent orders</h3><div class="r"><button class="btn sm" id="tcols">Columns</button><button class="btn sm" id="tadd">Add order</button></div></div>
      <div id="tbulk"></div><div class="tbl-wrap" id="ttable"></div></div></div>`;
-  $('#tq').oninput = e => { TR.q = e.target.value; drawOrders(); };
+  let tqt; $('#tq').oninput = e => { TR.q = e.target.value; clearTimeout(tqt); tqt = setTimeout(drawOrders, 120); };
   $('#tret').onchange = e => { TR.retailer = e.target.value; drawOrders(); };
   $('#trange').onclick = e => { const b = e.target.closest('[data-r]'); if (!b) return; TR.range = b.dataset.r; $$('#trange button').forEach(x => x.classList.toggle('on', x === b)); drawOrders(); };
   $('#tstat').onclick = e => { const b = e.target.closest('[data-s]'); if (!b) return; TR.status = b.dataset.s; $$('#tstat button').forEach(x => x.classList.toggle('on', x === b)); drawOrders(); };
@@ -49,7 +54,7 @@ PAGES.tracking = async function (v) {
 
 function filteredOrders() {
   let o = TR.data.orders; const q = TR.q.toLowerCase();
-  if (q) o = o.filter(x => [x.order_number, x.tracking, x.product, x.account, x.retailer].join(' ').toLowerCase().includes(q) || x.items.some(i => i.name.toLowerCase().includes(q)));
+  if (q) o = o.filter(x => x._h.includes(q));
   if (TR.retailer) o = o.filter(x => x.retailer === TR.retailer);
   if (TR.status !== 'all') o = o.filter(x => x.status === TR.status);
   if (TR.range !== 'all') { const cut = new Date(Date.now() - TR.range * 864e5).toISOString().slice(0, 10); o = o.filter(x => (x.order_date || '') >= cut); }
@@ -145,7 +150,7 @@ PAGES.attention = async function (v) {
     $('[data-dis]', card).onclick = () => done(() => api('/api/attention/resolve', { id: a.id }));
     $$('[data-ign]', card).forEach(b => b.onclick = () => done(() => api('/api/attention/resolve', { id: a.id, ignore: b.dataset.ign }), 'Ignored from now on'));
     $('[data-add]', card).onclick = async () => {
-      TR.data = TR.data || await api('/api/tracking');
+      TR.data = TR.data || await loadTracking();
       const m = (a.snippet + ' ' + a.subject).match(/(?:order|#)\s*#?\s*([A-Z0-9][A-Z0-9-]{5,24})/i);
       orderForm({ retailer: a.guess, order_number: m ? m[1].toUpperCase() : '', status: 'placed', order_date: new Date().toISOString().slice(0, 10), qty: 1 });
       const sv = $('#fsave'); const orig = sv.onclick;

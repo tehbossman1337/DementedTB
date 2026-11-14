@@ -95,6 +95,9 @@ def save_account(c, d, aid=None):
         aid = c.execute("INSERT INTO mail_accounts(email,username,provider,host,port,password,enabled,created_at) VALUES(?,?,?,?,?,?,1,?)",
                         (em, str(d.get("username") or "").strip(), prov, host, port, pw, db.now())).lastrowid
     c.commit()
+    from . import inbox
+    inbox._drop(aid)  # sign in again with the new details
+    threading.Thread(target=inbox.check_all, daemon=True).start()  # show its inbox right away
     return aid
 
 
@@ -102,6 +105,8 @@ def delete_account(c, aid):
     c.execute("DELETE FROM mail_accounts WHERE id=?", (aid,))
     c.commit()
     LIVE["accounts"].pop(aid, None)
+    from . import inbox
+    inbox.forget_account(c, aid)
 
 
 def set_enabled(c, aid, on):

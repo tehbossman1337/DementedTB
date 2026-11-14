@@ -544,5 +544,36 @@ except ValueError:
 check("restore refuses foreign paths", _bad)
 check("snapshots listed", any(x["kind"] == "before-restore" for x in _d3.list_snapshots()))
 
+# inbox against a local fake IMAP server
+import time as _tm
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fake_imap as _F
+from dt import inbox as _ib, mail as _ml2
+_fsv, _fp = _F.start(); _F.patch_login(_ml2, _fp)
+for _i in range(3):
+    _F.add(_F.make(f"Shop {_i} <s{_i}@shop.com>", f"Hello {_i}", f"Body text number {_i}", when=_tm.time() - 3600 + _i * 60))
+_F.add(_F.make("Target <orders@target.com>", "Your order", "plain", html='<p onclick="x()">Hi <img src="https://t.example/p.gif"><script>alert(1)</script><a href="javascript:evil()">x</a></p>', attach=("r.pdf", b"%PDF")), flags=["\\Seen"])
+_c5 = _d3.connect()
+_c5.execute("UPDATE mail_accounts SET enabled=0"); _c5.commit()
+_aid5 = _c5.execute("INSERT INTO mail_accounts(email,provider,host,port,password,enabled,created_at) VALUES('box@icloud.com','icloud','x',993,'pw',1,'x')").lastrowid; _c5.commit()
+check("inbox first check reads the mailbox", _ib.check_all() == 4 and _ib.list_messages(_c5)["total"] == 4)
+_L5 = _ib.list_messages(_c5)["messages"]
+check("inbox list newest first with previews and flags", _L5[0]["subject"] == "Your order" and _L5[0]["seen"] == 1 and _L5[0]["attach"] == 1 and _L5[1]["snippet"].startswith("Body text"))
+_m5 = _ib.open_message(_c5, _aid5, 4)
+check("opened html is cleaned", _m5["kind"] == "html" and "<script" not in _m5["body"] and "onclick" not in _m5["body"] and "javascript" not in _m5["body"] and _m5["remote_images"] == 1)
+check("attachment listed and readable", _m5["attachments"][0]["name"] == "r.pdf" and _ib.attachment(_c5, _aid5, 4, _m5["attachments"][0]["idx"])[2] == b"%PDF")
+_ib.open_message(_c5, _aid5, 1)
+check("opening marks read on the server too", "\\Seen" in _F.box()["msgs"][0]["flags"] and _c5.execute("SELECT seen FROM inbox_msgs WHERE account_id=? AND uid=1", (_aid5,)).fetchone()[0] == 1)
+_F.add(_F.make("New <n@x.com>", "Fresh one", "new!")); _F.box()["msgs"][1]["flags"].add("\\Seen")
+check("next check picks up new mail and read-elsewhere", _ib.check_all() == 1 and _ib.summary(_c5)["unread"] == 2)
+_ib.delete(_c5, _aid5, [2])
+check("delete moves to Deleted Messages", len(_F.box("Deleted Messages")["msgs"]) == 1 and all(m["uid"] != 2 for m in _F.box()["msgs"]))
+_ib.set_flags(_c5, _aid5, [3], "flagged", True)
+check("flag syncs to server", "\\Flagged" in [m for m in _F.box()["msgs"] if m["uid"] == 3][0]["flags"])
+_F.box()["msgs"] = [m for m in _F.box()["msgs"] if m["uid"] != 3]; _ib.check_all()
+check("deleted on the phone disappears here", all(m["uid"] != 3 for m in _ib.list_messages(_c5)["messages"]))
+_ml2.delete_account(_c5, _aid5)
+check("removing the account clears its inbox", _c5.execute("SELECT COUNT(*) FROM inbox_msgs WHERE account_id=?", (_aid5,)).fetchone()[0] == 0)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

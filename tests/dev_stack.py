@@ -6,7 +6,10 @@ os.environ.update(DT_DATA=os.path.join(TMP, "app"), DT_NO_AUTO="1", DT_NO_TOAST=
 os.makedirs(os.environ["DT_DATA"]); os.makedirs(os.environ["DATA_DIR"])
 sys.path.insert(0, os.path.join(ROOT, "app")); sys.path.insert(0, os.path.join(ROOT, "license-server"))
 import server as LS
-from dt import arsenal, db, mail, orders, server as S, notify
+from dt import arsenal, db, mail, orders, server as S, notify, inbox
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import fake_imap as FI  # a local stand-in for iCloud's mail server
+_fs, _fport = FI.start(); FI.patch_login(mail, _fport)
 ls = LS.make_server(int(os.environ.get("LPORT", 18787))); threading.Thread(target=ls.serve_forever, daemon=True).start()
 lc = LS.db(); KEY = LS.make_license(lc, "Demented", "member", 365); lc.close()
 c = db.connect(); db.put(c, "license_url", f"http://127.0.0.1:{ls.server_address[1]}")
@@ -24,6 +27,21 @@ if os.environ.get("SEED", "1") == "1":
     arsenal.ingest_message(c, {"id": "1", "timestamp": "2026-11-05T15:00:00+00:00", "author": {"username": "valor"}, "embeds": [{"title": "Successful Checkout", "fields": [{"name": "Product", "value": "Pokémon TCG: Mega Evolution Elite Trainer Box"}, {"name": "Site", "value": "Pokémon Center"}, {"name": "Price", "value": "$131.38"}, {"name": "Order #", "value": "P0041360611"}]}]}, "c1")
     arsenal.ingest_message(c, {"id": "2", "timestamp": "2026-11-06T15:00:00+00:00", "author": {"username": "Shikari"}, "embeds": [{"title": "Checkout Success", "fields": [{"name": "Product", "value": "Prismatic Evolutions Booster Bundle"}, {"name": "Site", "value": "Target"}]}]}, "c1")
     notify.notify(c, "shipped", "Shipped: Target", "Prismatic Evolutions Booster Bundle", link="tracking", dedupe="seed1", push=False)
+# a local stand-in for iCloud's mail server, so the Inbox page has real mail to show
+if os.environ.get("SEED", "1") == "1":
+    now = time.time()
+    FI.add(FI.make("Pokémon Center <noreply@pokemoncenter.com>", "Your Pokémon Center order P0041360611 has shipped", "Good news! Your order is on its way. Track it with UPS 1Z999AA10123456784.",
+                   to="honker.wintry-0n@icloud.com", html='<div style="font-family:Arial;max-width:560px"><h2 style="color:#1d1d24">Your order is on its way</h2><p>Order <b>P0041360611</b> shipped with UPS.</p><img src="https://example.com/banner.png" width="500"><p><a href="https://www.pokemoncenter.com/">Track your package</a></p><script>alert(1)</script></div>', when=now - 600))
+    FI.add(FI.make("Target <orders@target.com>", "Thanks for your order! #912345678", "We got your order for Prismatic Evolutions Booster Bundle. Total $54.99.", when=now - 7200), flags=["\\Seen"])
+    FI.add(FI.make("Apple <no_reply@email.apple.com>", "Your receipt from Apple", "Receipt for iCloud+ 50GB, $0.99.", when=now - 86400 * 2, attach=("Receipt.pdf", b"%PDF-1.4 demo")), flags=["\\Seen"])
+    FI.add(FI.make("Walmart <help@walmart.com>", "Delivered: Charizard Collection", "Your package was delivered to the front door.", to="after.innings.07@icloud.com", when=now - 86400 * 4), flags=["\\Seen", "\\Flagged"])
+    while inbox.STATE['checking']:
+        time.sleep(0.1)
+    inbox.check_all()
+    if os.environ.get("INBOX_LIVE") == "1":  # the UI test checks that new mail shows up on its own
+        inbox.INTERVAL = 3
+        threading.Thread(target=inbox.loop, args=(3,), daemon=True).start()
+        threading.Timer(10, lambda: FI.add(FI.make("Best Buy <BestBuyInfo@emailinfo.bestbuy.com>", "Your Best Buy order has been received", "Order BBY01-806123456789 is confirmed."))).start()
 srv, port = S.make_server(int(os.environ.get("APORT", 18766)))
 print(json.dumps({"key": KEY, "app": f"http://127.0.0.1:{port}", "tmp": TMP}), flush=True)
 srv.serve_forever()

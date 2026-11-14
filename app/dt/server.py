@@ -3,6 +3,7 @@ import gzip
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -10,7 +11,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import (stats, desktop, arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
+from . import (inbox, stats, desktop, arsenal, backup, build_info, config, db, delivery, discord, license as lic, inventory, logs, mail, notify, orders, parsers, presence, profiles, updater)
 
 GET, POST = {}, {}
 OPEN = {"/api/window/show", "/api/diag", "/api/version", "/api/license/status", "/api/license/activate", "/api/license/server", "/api/clientlog"}
@@ -119,6 +120,62 @@ def _(c, q):
 @get("/api/stats/stick")
 def _(c, q):
     return stats.stick_rates(c, int((q.get("days") or ["0"])[0] or 0), (q.get("retailer") or [""])[0])
+
+
+@get("/api/inbox")
+def _(c, q):
+    g = lambda k, d="": (q.get(k) or [d])[0]
+    return {**inbox.list_messages(c, int(g("account", "0") or 0), g("q"), g("unread") == "1", g("flagged") == "1", int(g("limit", "300")), int(g("offset", "0"))),
+            "summary": inbox.summary(c)}
+
+
+@get("/api/inbox/state")
+def _(c, q):
+    return {"rev": inbox.STATE["rev"], "last": inbox.STATE["last"], "checking": inbox.STATE["checking"]}
+
+
+@get("/api/inbox/message")
+def _(c, q):
+    return inbox.open_message(c, int(q["account"][0]), int(q["uid"][0]), (q.get("images") or ["0"])[0] == "1")
+
+
+@post("/api/inbox/flags")
+def _(c, b):
+    inbox.set_flags(c, int(b["account"]), b.get("uids") or [], b.get("flag") or "seen", bool(b.get("on")))
+    return {"ok": True}
+
+
+@post("/api/inbox/delete")
+def _(c, b):
+    inbox.delete(c, int(b["account"]), b.get("uids") or [])
+    return {"ok": True}
+
+
+@post("/api/inbox/check")
+def _(c, b):
+    threading.Thread(target=inbox.check_all, daemon=True).start()
+    return {"ok": True}
+
+
+@post("/api/inbox/attachment")
+def _(c, b):
+    """Save an attachment to Downloads and open it."""
+    name, ctype, data = inbox.attachment(c, int(b["account"]), int(b["uid"]), int(b["idx"]))
+    folder = os.path.join(os.path.expanduser("~"), "Downloads")
+    os.makedirs(folder, exist_ok=True)
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", name).strip() or "attachment"
+    base, ext = os.path.splitext(safe)
+    path, n = os.path.join(folder, safe), 1
+    while os.path.exists(path):
+        path, n = os.path.join(folder, f"{base} ({n}){ext}"), n + 1
+    with open(path, "wb") as f:
+        f.write(data)
+    if b.get("open") and os.name == "nt":
+        try:
+            os.startfile(path)
+        except OSError:
+            pass
+    return {"ok": True, "path": path}
 
 
 @get("/api/desktop")
@@ -1058,7 +1115,7 @@ def make_server(port=8765):
 def start_background(delay=2.5):
     """Mail, Discord, carrier and presence loops start a moment after launch so the window gets the first paint to itself."""
     def go():
-        for fn in (mail.live_loop, discord.poll_loop, delivery.poll_loop, presence.loop, lic.refresh_loop):
+        for fn in (inbox.loop, mail.live_loop, discord.poll_loop, delivery.poll_loop, presence.loop, lic.refresh_loop):
             threading.Thread(target=fn, daemon=True).start()
     if not delay:
         return go()

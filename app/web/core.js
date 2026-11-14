@@ -29,6 +29,12 @@ const IC = {
   tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.500" cy="8.500" r="1.400"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   scan: '<path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/>',
+  inbox: '<path d="M3 13l2.5-7.5A2 2 0 017.4 4h9.2a2 2 0 011.9 1.5L21 13v5a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  clip: '<path d="M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7L9.7 17.2a1.6 1.6 0 01-2.3-2.3l7.6-7.6"/>',
+  dot: '<circle cx="12" cy="12" r="4" fill="currentColor"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
 };
 const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${IC[n] || ''}</svg>`;
@@ -95,12 +101,12 @@ const readText = f => new Promise((res, rej) => { const r = new FileReader(); r.
 /* ---------- state + shell */
 const S = { route: 'tracking', info: null, page: null, shell: null, tok: 0 };
 const NAV = [
-  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['stick', 'Stick rates', 'chart'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
+  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['stick', 'Stick rates', 'chart'], ['inbox', 'Inbox', 'inbox'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
   { id: 'arsenal', label: 'Arsenal', icon: 'target', items: [['checkouts', 'Checkouts', 'doc'], ['servers', 'Servers & channels', 'discord'], ['bots', 'Bots & proxies', 'layers'], ['rules', 'Price rules', 'doc']] },
   { id: 'inv', label: 'Inventory', icon: 'archive', items: [['inv_dash', 'Dashboard', 'chart'], ['inv_items', 'Items', 'box'], ['inv_sales', 'Sales', 'tag'], ['inv_receipts', 'Receipts', 'receipt'], ['inv_scan', 'Scan station', 'scan'], ['inv_tax', 'Tax summary', 'doc'], ['inv_settings', 'Fees & settings', 'gear']] },
   { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Accounts', 'key']] },
 ];
-const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], stick: ['Order Tracker', 'Stick rates'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
+const TITLES = { tracking: ['Order Tracker', 'Tracking'], attention: ['Order Tracker', 'Needs attention'], stick: ['Order Tracker', 'Stick rates'], inbox: ['Order Tracker', 'Inbox'], email: ['Order Tracker', 'Email accounts'], webhooks: ['Order Tracker', 'Discord webhooks'],
   checkouts: ['Arsenal', 'Checkouts'], servers: ['Arsenal', 'Servers & channels'], bots: ['Arsenal', 'Bots & proxies'], rules: ['Arsenal', 'Price rules'], profiles: ['Profiles & Accounts', 'Profiles'], siteaccts: ['Profiles & Accounts', 'Accounts'], inv_dash: ['Inventory', 'Dashboard'], inv_items: ['Inventory', 'Items'], inv_sales: ['Inventory', 'Sales'], inv_receipts: ['Inventory', 'Receipts'], inv_scan: ['Inventory', 'Scan station'], inv_tax: ['Inventory', 'Tax summary'], inv_settings: ['Inventory', 'Fees & settings'], settings: ['Demented Toolbox', 'Settings'] };
 
 function renderShell() {

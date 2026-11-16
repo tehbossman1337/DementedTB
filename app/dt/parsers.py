@@ -33,12 +33,12 @@ STATUS_LABEL = {"placed": "Placed", "shipped": "Shipped", "out_for_delivery": "O
 
 STATUS_RULES = [  # first match wins; checked against the subject, then the start of the body
     ("refunded", r"refund(ed)? (has been |was |is )?(issued|processed|initiated|on its way)|your refund|refund (confirmation|issued|processed)"),
-    ("partially_cancelled", r"partial(ly)? cancel|some items? (in your order )?(was|were|has been|have been) cancel|item(s)? (was|were|has been|have been) cancel|part of your order"),
+    ("partially_cancelled", r"partial(ly)? cancel|some items? (in|from) your order (was|were|has been|have been|got) cancel|some items? (was|were|has been|have been) cancel|an item (in|from) your order (was|has been) cancel|item(s)? (was|were|has been|have been) cancel|part of your order|had to cancel (an|some|one) item"),
     ("cancelled", r"cancel+ed|has been cancel|order cancellation|cancellation (confirm|notice)|unable to (fulfill|ship)|we.?re sorry.*order"),
-    ("out_for_delivery", r"out for delivery|arriving today|driver is on the way|on (its|the) way to you today"),
+    ("out_for_delivery", r"out for delivery|arriv(ing|es) today|driver is on the way|on (its|the) way to you today|your delivery is (almost here|on the way)"),
     ("delivered", r"\bdelivered\b|has been delivered|was delivered|ready for pickup|picked up"),
     ("shipped", r"\bshipped\b|has shipped|on its way|tracking number|shipment (confirmation|notification)|in transit"),
-    ("placed", r"order (confirmation|confirmed|received|placed|summary|details)|thank(s| you) for (your|shopping|ordering)|thank(s| you) for (your )?.{0,40}order|we.?ve received your order|your .{0,40}order|order #|confirmation"),
+    ("placed", r"order (confirmation|confirmed|received|placed|summary|details)|we got your order|order (has been|was) (received|placed)|here.?s your order|thank(s| you) for (your|shopping|ordering)|thank(s| you) for (your )?.{0,40}order|we.?ve received your order|your .{0,40}order|order #|confirmation"),
 ]
 ORDER_NO = [
     r"order\s*(?:number|no\.?|#|id)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-]{5,24})",
@@ -48,8 +48,47 @@ ORDER_NO = [
     r"\border\s+([0-9]{7,15})\b",
     r"#\s*([0-9]{6,15})",
 ]
+# What each big retailer's order emails actually look like. Tried before the generic patterns.
+PROFILES = {
+    "Walmart": {
+        # 2000140-12345678 (shown with a dash) or the same 15 digits run together
+        "order": [r"order\s*(?:#|number|no\.?)?\s*[:#]?\s*(\d{7}-\d{8})\b", r"\b(\d{7}-\d{8})\b", r"order\s*(?:#|number|no\.?)\s*[:#]?\s*(\d{13,16})\b"],
+        "status": [("cancelled", r"^(your )?order (was|has been) cancel+ed"), ("partially_cancelled", r"(item|items) (was|were|has been|have been)? ?cancel+ed"),
+                   ("delivered", r"^delivered[:!]|your (package|order|delivery) (was|has been) delivered"), ("shipped", r"^shipped[:!]|your (package|order|item)s? (has |have )?shipped"),
+                   ("out_for_delivery", r"arriv(es|ing) today|out for delivery")],
+    },
+    "Target": {
+        "order": [r"order\s*(?:#|number|no\.?)\s*[:#]?\s*(\d{9,16})\b", r"here.?s your order\s*#?\s*:?\s*(\d{9,16})"],
+        "status": [("placed", r"thanks for shopping with us|here.?s your order"), ("delivered", r"(was|has been) delivered|is ready for (pick ?up|drive ?up)|picked up"),
+                   ("shipped", r"(is|are) on (its|the|their) way|has shipped|have shipped|shipped")],
+        "skip_sender": r"targetnews@|@em\.target\.com|@e\.target\.com",
+    },
+    "Best Buy": {
+        "order": [r"\b(BBY\d{2}-\d{9,14})\b", r"order\s*(?:#|number|no\.?)\s*[:#]?\s*(BBY\d{2}-?\d{9,14})"],
+        "status": [("delivered", r"(was|has been) delivered|ready for (store )?pick ?up|picked up"), ("shipped", r"(has|have) shipped|is on (its|the) way|shipping confirmation"),
+                   ("placed", r"thanks for (your )?(order|shopping)|order (has been )?received|we.?ve got your order")],
+        "skip_sender": r"bestbuy@email\.bestbuy\.com|@e\.bestbuy\.com",
+    },
+}
+NOT_ORDER_SUBJECT = re.compile(r"\b(welcome to|verify your|confirm your email|password|sign[- ]?in|security code|one[- ]time (pass)?code|verification code|"
+                               r"account (created|update)|create your account|survey|review your (purchase|item)|rate your|how did we do|tell us what you think)\b", re.I)
 TRACKING = [r"\b(1Z[0-9A-Z]{16})\b", r"\b(9[2345]\d{18,22})\b", r"tracking\s*(?:number|no\.?|#)?\s*[:#]?\s*([A-Z0-9]{10,30})"]
 TOTAL = r"(?:order\s+total|total(?:\s+charged)?|grand total|amount charged|estimated total)\s*[:\-]?\s*\$\s*([\d,]+\.\d{2})"
+TOTAL_ALL = re.compile(r"(?<![A-Za-z])(order\s+total|grand\s+total|total\s+charged|amount\s+charged|estimated\s+total|payment\s+total|total)\s*[:\-]?\s*(?:\(\d+\s+items?\))?\s*\$\s*([\d,]+\.\d{2})", re.I)
+
+
+def find_total(body):
+    """The order total, not the subtotal: prefer an explicit 'order/grand total', otherwise the last plain 'Total'."""
+    best = None
+    for m in TOTAL_ALL.finditer(body or ""):
+        before = (body[max(0, m.start() - 4):m.start()]).lower()
+        if "sub" in before:
+            continue
+        label = m.group(1).lower()
+        if label != "total":
+            return m.group(2)
+        best = m.group(2)
+    return best or ""
 PRICE = re.compile(r"\$\s*([\d,]+\.\d{2})")
 SKU_RE = re.compile(r"(?:sku|dpci|item\s*#|item number|model)\s*[:#]?\s*([A-Z0-9\-]{5,20})", re.I)
 NOT_ITEM = re.compile(r"\b(total|subtotal|sub-total|tax|shipping|handling|discount|savings?|save|from|gift|balance|estimated|points|was|price|payment|visa|"
@@ -75,7 +114,12 @@ def detect_retailer(sender, extra="", default=None):
     return default
 
 
-def detect_status(subject, body):
+def detect_status(subject, body, retailer=None):
+    prof = PROFILES.get(retailer or "", {})
+    for hay in (subject or "",):
+        for status, pat in prof.get("status", []):
+            if re.search(pat, hay.strip(), re.I):
+                return status
     for hay in (subject or "", (body or "")[:1500]):
         for status, pat in STATUS_RULES:
             if re.search(pat, hay, re.I):
@@ -164,14 +208,19 @@ def parse_email(sender, subject, body, date_header=None, extra="", default=None)
     retailer = detect_retailer(fwd_from or sender, extra or f"{fwd_subj or subject}\n{(body or '')[:800]}", default)
     if not retailer:
         return None, "unknown retailer"
-    status = detect_status(fwd_subj or subject, body)
+    prof = PROFILES.get(retailer, {})
+    if prof.get("skip_sender") and re.search(prof["skip_sender"], fwd_from or sender or "", re.I):
+        return None, "marketing email"
+    if NOT_ORDER_SUBJECT.search(fwd_subj or subject or ""):
+        return None, "not an order email"
+    status = detect_status(fwd_subj or subject, body, retailer)
     if not status:
         return None, "could not tell the order status"
     text = f"{subject}\n{fwd_subj}\n{body}"
-    order_no = _first(ORDER_NO, text)
+    order_no = _first(prof.get("order", []), text) or _first(ORDER_NO, text)
     if not order_no:
         return None, "no order number found"
-    total = _first([TOTAL], body)
+    total = find_total(body)
     tracking = ""
     if status in ("shipped", "out_for_delivery", "delivered", "placed"):
         tracking = _first(TRACKING, body) if status != "placed" else ""

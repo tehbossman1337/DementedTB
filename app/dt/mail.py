@@ -30,7 +30,23 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SKIP_FOLDERS = re.compile(r"(^|/)(drafts?|trash|deleted (messages|items)|junk|spam|sent( mail| items| messages)?|outbox|archive/trash)$|\[gmail\]/(drafts|trash|spam|sent mail|important|starred)", re.I)
 ORDER_WORDS = re.compile(r"order|ship|deliver|cancel|receipt|confirm|tracking|pick ?up|purchase|package|parcel|refund|invoice|payment|thank(s| you)|pre-?order|arriv|on (its|the) way|out for|expected|delay|label", re.I)
 RETAIL_SENDER = re.compile("|".join(re.escape(d) for ds in parsers.RETAILERS.values() for d in ds), re.I)
-PARSER_VERSION = 1
+PARSER_VERSION = 2  # bump when the order reader gets better: mail it skipped before is read again once
+
+
+def maybe_reparse():
+    """After an order-reader upgrade, forget which emails were skipped or sent to Needs attention so the next sync reads them again
+    (within the normal look-back window). Orders already found are untouched."""
+    c = db.connect()
+    try:
+        if int(db.get(c, "parser_version", "1") or 1) >= PARSER_VERSION:
+            return False
+        c.execute("DELETE FROM processed WHERE outcome='not an order' OR outcome LIKE 'needs attention%'")
+        c.execute("DELETE FROM settings WHERE key LIKE 'wm:%'")
+        db.put(c, "parser_version", str(PARSER_VERSION))
+        c.commit()
+        return True
+    finally:
+        c.close()
 DBLOCK = threading.Lock()
 LIVE = {"running": False, "since": 0, "accounts": {}, "syncing": set()}
 
@@ -197,12 +213,15 @@ def _dec(v):
         return str(v or "")
 
 
+ZERO_WIDTH = re.compile("[\u00ad\u034f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]")
+
+
 def _html_to_text(h):
     h = re.sub(r"(?is)<(script|style|head).*?</\1>", " ", h)
     h = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h\d|table)>|</t[dh]>", "\n", h)
     h = re.sub(r"<[^>]+>", " ", h)
     import html
-    h = html.unescape(h)
+    h = ZERO_WIDTH.sub("", html.unescape(h))  # preheader padding (&zwnj; &#847; …) would otherwise hide the real text
     return "\n".join(re.sub(r"[ \t\xa0]+", " ", l).strip() for l in h.splitlines() if l.strip())
 
 
@@ -224,7 +243,15 @@ def body_text(msg):
         else:
             html_ += t + "\n"
     htext = _html_to_text(html_) if html_ else ""
-    return htext if len(htext) > len(plain) * 1.2 else (plain or htext)
+    import html as _h
+    plain = ZERO_WIDTH.sub("", _h.unescape(plain))  # some retailers' text parts are full of literal "&zwnj;" and tracking links
+    plain = "\n".join(re.sub(r"[ \t\xa0]+", " ", l).strip() for l in plain.splitlines() if l.strip())
+    plain_words = re.sub(r"https?://\S+", "", plain)
+    # The HTML part is what the retailer designed and tested; its text keeps the item/price/total layout. Use the text part only when
+    # the HTML gave (almost) nothing.
+    if htext and len(htext) >= 0.4 * len(plain_words):
+        return htext
+    return plain or htext
 
 
 def recipient(msg, mailbox):
@@ -249,8 +276,10 @@ def process_message(c, mid, msg, mailbox, excs, own, announce=True):
     if ev:
         outcome, oid = orders.apply_event(c, ev, account=recipient(msg, mailbox), announce=announce)
         c.execute("INSERT OR REPLACE INTO processed VALUES(?,?,?,?,?)", (mid, mailbox, ev["retailer"], outcome, db.now()))
+        c.execute("UPDATE attention SET resolved=1 WHERE message_id=? AND resolved=0", (mid,))  # it was waiting before the reader learned this format
         return "order"
-    looks = bool(RETAIL_SENDER.search(sender + (msg.get("Reply-To") or "")) or forced or re.search(r"\border\b", subject, re.I)) and bool(ORDER_WORDS.search(subject))
+    looks = bool(RETAIL_SENDER.search(sender + (msg.get("Reply-To") or "")) or forced or re.search(r"\border\b", subject, re.I)) and bool(ORDER_WORDS.search(subject)) \
+        and why not in ("marketing email", "not an order email")
     if looks and why != "unknown retailer" or (looks and RETAIL_SENDER.search(sender)):
         guess = parsers.detect_retailer(sender, extra) or ""
         c.execute("INSERT OR IGNORE INTO attention(message_id,account,sender,subject,reason,snippet,guess,created_at,body,date_hdr) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -527,6 +556,11 @@ def live_loop(interval=10):
     import os
     if os.environ.get("DT_NO_AUTO"):
         return
+    try:
+        if maybe_reparse():  # the order reader improved: re-read mail it skipped before (quietly, no pop-ups for old mail)
+            threading.Thread(target=sync_all, kwargs={"announce": False}, daemon=True).start()
+    except Exception:
+        pass
     LIVE.update(running=True, since=time.time(), interval=interval)
     threads = {}
     while True:

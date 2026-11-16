@@ -35,6 +35,8 @@ if os.environ.get("SEED", "1") == "1":
     FI.add(FI.make("Target <orders@target.com>", "Thanks for your order! #912345678", "We got your order for Prismatic Evolutions Booster Bundle. Total $54.99.", when=now - 7200), flags=["\\Seen"])
     FI.add(FI.make("Apple <no_reply@email.apple.com>", "Your receipt from Apple", "Receipt for iCloud+ 50GB, $0.99.", when=now - 86400 * 2, attach=("Receipt.pdf", b"%PDF-1.4 demo")), flags=["\\Seen"])
     FI.add(FI.make("Walmart <help@walmart.com>", "Delivered: Charizard Collection", "Your package was delivered to the front door.", to="after.innings.07@icloud.com", when=now - 86400 * 4), flags=["\\Seen", "\\Flagged"])
+    import retail_samples as RS
+    FI.add(RS.SAMPLES[0][0].as_bytes(), flags=["\\Seen"])  # a Walmart order confirmation
     while inbox.STATE['checking']:
         time.sleep(0.1)
     inbox.check_all()

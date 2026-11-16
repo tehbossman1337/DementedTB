@@ -157,6 +157,32 @@ def _(c, b):
     return {"ok": True}
 
 
+@get("/api/inbox/order")
+def _(c, q):
+    return inbox.read_as_order(c, int(q["account"][0]), int(q["uid"][0]))
+
+
+@post("/api/inbox/order")
+def _(c, b):
+    return inbox.add_as_order(c, int(b["account"]), int(b["uid"]))
+
+
+@post("/api/inbox/save")
+def _(c, b):
+    """Save the original email (.eml) to Downloads, e.g. to send it in when an order email isn't read right."""
+    raw = inbox.raw_message(c, int(b["account"]), int(b["uid"]))
+    m = c.execute("SELECT subject FROM inbox_msgs WHERE account_id=? AND uid=?", (int(b["account"]), int(b["uid"]))).fetchone()
+    name = re.sub(r'[\\/:*?"<>|]+', "_", (m["subject"] if m else "") or "email").strip()[:80] or "email"
+    folder = os.path.join(os.path.expanduser("~"), "Downloads")
+    os.makedirs(folder, exist_ok=True)
+    path, n = os.path.join(folder, name + ".eml"), 1
+    while os.path.exists(path):
+        path, n = os.path.join(folder, f"{name} ({n}).eml"), n + 1
+    with open(path, "wb") as f:
+        f.write(raw)
+    return {"ok": True, "path": path}
+
+
 @post("/api/inbox/attachment")
 def _(c, b):
     """Save an attachment to Downloads and open it."""

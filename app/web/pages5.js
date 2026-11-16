@@ -79,7 +79,8 @@ PAGES.inbox = async function (v) {
     R.innerHTML = `<div class="ib-head"><h2>${esc(m.subject)}</h2>
         <div class="ib-meta"><div class="ib-from"><div class="ib-av">${esc(ibInitials(m))}</div><div><b>${esc(m.from_name || m.from_addr)}</b> <span class="muted">&lt;${esc(m.from_addr)}&gt;</span>
           <div class="muted small">to ${esc(m.to)}${m.cc ? ` · cc ${esc(m.cc)}` : ''} · ${new Date(m.date * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div></div></div>
-        <div class="ib-acts"><button class="btn sm ghost" data-x="unread" title="Mark as unread (U)">${icon('dot', 15)}Unread</button><button class="btn sm ghost ${meta.flagged ? 'on' : ''}" data-x="flag" title="Flag">${icon('flag', 15)}${meta.flagged ? 'Flagged' : 'Flag'}</button><button class="btn sm ghost" data-x="del" title="Delete (Del)">${icon('trash', 15)}Delete</button></div></div></div>
+        <div class="ib-acts"><button class="btn sm ghost" data-x="unread" title="Mark as unread (U)">${icon('dot', 15)}Unread</button><button class="btn sm ghost ${meta.flagged ? 'on' : ''}" data-x="flag" title="Flag">${icon('flag', 15)}${meta.flagged ? 'Flagged' : 'Flag'}</button><button class="btn sm ghost" data-x="order" title="See what the order tracker reads from this email">${icon('box', 15)}Order</button><button class="btn sm ghost" data-x="del" title="Delete (Del)">${icon('trash', 15)}Delete</button></div></div></div>
+      <div id="ib-ord"></div>
       ${m.remote_images && !allowImg ? `<div class="ib-imgbar">Images from the sender are hidden to stop read-tracking. <button class="btn sm" data-x="img">Show images</button></div>` : ''}
       ${m.attachments.length ? `<div class="ib-atts">${m.attachments.map(a => `<button class="ib-att" data-att="${a.idx}" title="Save to Downloads and open">${icon('clip', 15)}<span>${esc(a.name)}</span><em>${a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(a.size / 1024)) + ' KB'}</em></button>`).join('')}</div>` : ''}
       <iframe class="ib-frame ${m.kind}" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe>`;
@@ -92,6 +93,19 @@ PAGES.inbox = async function (v) {
       if (x === 'unread') { await act(() => api('/api/inbox/flags', { account: aid, uids: [uid], flag: 'seen', on: false })); meta.seen = 0; IB.sel = null; await refresh(); }
       if (x === 'flag') { await act(() => api('/api/inbox/flags', { account: aid, uids: [uid], flag: 'flagged', on: !meta.flagged })); meta.flagged = meta.flagged ? 0 : 1; drawList(); drawReader(); }
       if (x === 'del') del(aid, uid);
+      if (x === 'order') {
+        const box = $('#ib-ord'); box.innerHTML = '<div class="ib-ordbar"><span class="spin"></span></div>';
+        let r; try { r = await api(`/api/inbox/order?account=${aid}&uid=${uid}`); } catch (e) { box.innerHTML = `<div class="ib-ordbar">${esc(e.message)}</div>`; return; }
+        const ev = r.event, st = TR.data && TR.data.statuses || {};
+        box.innerHTML = ev
+          ? `<div class="ib-ordbar"><div><b>${esc(ev.retailer)}</b> · order ${esc(ev.order_number)} · ${esc((st[ev.status] || ev.status).replace('_', ' '))}${ev.total ? ' · ' + money(ev.total) : ''}${ev.items.length ? ` · ${ev.items.reduce((a, i) => a + i.qty, 0)} item${ev.items.reduce((a, i) => a + i.qty, 0) > 1 ? 's' : ''}` : ''}${ev.tracking ? ' · ' + esc(ev.tracking) : ''}
+               <div class="muted small">${r.tracked ? 'Already in Tracking' : 'Not in Tracking yet'} · account ${esc(r.account)}</div></div>
+               <button class="btn sm" data-x="addord">${r.tracked ? 'Update Tracking' : 'Add to Tracking'}</button></div>`
+          : `<div class="ib-ordbar"><div>The order tracker can't read this as an order: <b>${esc(r.reason)}</b>${r.retailer_guess ? ` (looks like ${esc(r.retailer_guess)})` : ''}
+               <div class="muted small">Save the email file and send it in so this format can be added.</div></div><button class="btn sm" data-x="eml">Save email file</button></div>`;
+      }
+      if (x === 'addord') { const r = await act(() => api('/api/inbox/order', { account: aid, uid })); if (r) { toast('Tracking: ' + r.outcome); TR.data = null; pollShell(); $('[data-x="order"]').click(); } }
+      if (x === 'eml') { const r = await act(() => api('/api/inbox/save', { account: aid, uid })); if (r) toast('Saved to ' + r.path); }
     };
   };
   const del = async (aid, uid) => {

@@ -502,3 +502,36 @@ def forget_account(c, aid):
     c.execute("DELETE FROM inbox_state WHERE account_id=?", (aid,))
     c.commit()
     _bump()
+
+
+# ---------------------------------------------------------------- order reader check (what the tracker makes of this email)
+def read_as_order(c, aid, uid):
+    from . import parsers
+    acct = _acct(c, aid)
+    msg = email.message_from_bytes(_raw(acct, uid), policy=policy.default)
+    sender, subject = _dec(msg.get("From", "")), _dec(msg.get("Subject", ""))
+    body = mail.body_text(msg)
+    forced = mail.rule_retailer(db.rows(c, "SELECT * FROM retailer_rules"), sender)
+    ev, why = parsers.parse_email(sender, subject, body, msg.get("Date"), extra=f"{msg.get('Reply-To', '')}\n{subject}\n{body[:800]}", default=forced)
+    if ev and forced:
+        ev["retailer"] = forced
+    known = None
+    if ev:
+        r = c.execute("SELECT id, status FROM orders WHERE retailer=? AND order_number=?", (ev["retailer"], ev["order_number"])).fetchone()
+        known = dict(r) if r else None
+    return {"event": ev, "reason": why, "tracked": known, "account": mail.recipient(msg, acct["email"]),
+            "retailer_guess": parsers.detect_retailer(sender, f"{subject}\n{body[:800]}") or ""}
+
+
+def add_as_order(c, aid, uid):
+    r = read_as_order(c, aid, uid)
+    if not r["event"]:
+        raise ValueError("This email can't be read as an order: " + r["reason"])
+    from . import orders
+    outcome, oid = orders.apply_event(c, r["event"], account=r["account"], announce=False)
+    c.commit()
+    return {"outcome": outcome, "order_id": oid}
+
+
+def raw_message(c, aid, uid):
+    return _raw(_acct(c, aid), uid)

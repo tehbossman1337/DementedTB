@@ -575,5 +575,26 @@ check("deleted on the phone disappears here", all(m["uid"] != 3 for m in _ib.lis
 _ml2.delete_account(_c5, _aid5)
 check("removing the account clears its inbox", _c5.execute("SELECT COUNT(*) FROM inbox_msgs WHERE account_id=?", (_aid5,)).fetchone()[0] == 0)
 
+# Walmart / Target / Best Buy order emails (HTML with junk text parts) end to end
+import retail_samples as _RS
+from dt import parsers as _P
+_c6 = _d3.connect()
+_okc = 0
+for _m, _w in _RS.SAMPLES:
+    _b = _ml2.body_text(_m)
+    _ev, _why = _P.parse_email(_m["From"], _m["Subject"], _b, _m["Date"], extra=f"{_m['Subject']}\n{_b[:800]}")
+    _good = bool(_ev) and all(_ev.get(k) == v for k, v in _w.items() if k not in ("items", "qty")) and ("items" not in _w or len(_ev["items"]) == _w["items"]) \
+        and ("qty" not in _w or _ev["items"][0]["qty"] == _w["qty"])
+    check(f"reads {_w['retailer']} '{_m['Subject'][:40]}'", _good, (_why, _ev and {k: _ev.get(k) for k in _w if k not in ('items', 'qty')}))
+for _m in _RS.NEGATIVE:
+    check(f"ignores marketing '{_m['Subject'][:30]}'", _ml2.process_message(_c6, _m["Message-ID"], _m, "me@icloud.com", [], set(), announce=False) == "skipped")
+_wm_order = _RS.SAMPLES[0][0]
+check("walmart confirmation becomes an order in Tracking", _ml2.process_message(_c6, "<rs-1>", _wm_order, "me@icloud.com", [], set(), announce=False) == "order"
+      and _c6.execute("SELECT total FROM orders WHERE order_number='2000140-27154038'").fetchone()[0] == 136.40)
+check("total ignores the subtotal", _P.find_total("Subtotal $10.00\nTax $1.00\nTotal $11.00") == "11.00" and _P.find_total("Order total: $5.00\nTotal savings $1.00") == "5.00")
+_c6.execute("INSERT OR REPLACE INTO processed VALUES('<old-skip>','me','','not an order',?)", (_d3.now(),)); _d3.put(_c6, "parser_version", "1"); _d3.put(_c6, "wm:1:INBOX:7", "99"); _c6.commit()
+check("reader upgrade re-reads skipped mail once", _ml2.maybe_reparse() and not _c6.execute("SELECT 1 FROM processed WHERE message_id='<old-skip>'").fetchone()
+      and _d3.get(_c6, "wm:1:INBOX:7", "") == "" and not _ml2.maybe_reparse())
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

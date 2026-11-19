@@ -176,13 +176,56 @@ def _loose_items(lines):
             or next((lines[j].strip() for j in range(i - 1, max(-1, i - 5), -1) if _name_like(lines[j])), None)
         pm = next((PRICE.search(w) for w in lines[max(0, i - 1):i + 4] if PRICE.search(w)), None)
         if name and pm and qty:
-            items.append({"name": PRICE.sub("", name).strip(" -–:|"), "qty": qty, "price": round(float(pm.group(1).replace(",", "")) / qty, 2)})
+            amt = float(pm.group(1).replace(",", ""))
+            items.append({"name": PRICE.sub("", name).strip(" -–:|"), "qty": qty, "price": round(amt / qty, 2), "_amt": amt})
     if items:
         return items
     for ln in lines:
         m = re.match(r"^(.{8,120}?)\s{1,}[-–:|]?\s*\$\s*([\d,]+\.\d{2})\s*$", ln.strip())
         if m and _name_like(m.group(1)) and not NOT_ITEM.search(m.group(1)):
-            items.append({"name": m.group(1).strip(" -–:|"), "qty": 1, "price": float(m.group(2).replace(",", ""))})
+            items.append({"name": m.group(1).strip(" -–:|"), "qty": 1, "price": float(m.group(2).replace(",", "")), "_amt": float(m.group(2).replace(",", ""))})
+    return items
+
+
+def _money(label_re, body):
+    m = re.search(r"(?<![A-Za-z])(?:" + label_re + r")\s*[:\-]?\s*\$\s*([\d,]+\.\d{2})", body or "", re.I)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def amounts(body):
+    """Subtotal, tax and shipping as printed in the email (None when not shown). 'Free' shipping counts as 0."""
+    sub = _money(r"sub-?\s?total|items? subtotal|merchandise(?: subtotal)?|item\(s\) subtotal", body)
+    tax = _money(r"(?:estimated\s+)?(?:sales\s+)?tax(?:es)?", body)
+    ship = _money(r"shipping(?:\s*(?:&|and)\s*handling)?|delivery(?: fee)?|estimated shipping", body)
+    if ship is None and re.search(r"(?<![A-Za-z])(shipping|delivery)\s*[:\-]?\s*free\b", body or "", re.I):
+        ship = 0.0
+    return {"subtotal": sub, "tax": tax, "shipping": ship}
+
+
+def fix_item_prices(items, subtotal=None, total=None):
+    """An amount next to an item is sometimes the price of one and sometimes the line total (price × qty). Pick whichever reading matches
+    the email's subtotal (or, without one, doesn't exceed the order total). Returns items with a per-unit 'price'."""
+    if not items:
+        return items
+    as_line = sum(it.get("_amt", it["price"] * it["qty"]) for it in items)            # amount was the line total
+    as_unit = sum(it.get("_amt", it["price"]) * it["qty"] for it in items)            # amount was one unit
+    target = subtotal or None
+    pick_unit = None
+    if target:
+        dl, du = abs(as_line - target), abs(as_unit - target)
+        if min(dl, du) <= max(0.05, target * 0.02):
+            pick_unit = du < dl
+    elif total and as_line != as_unit:
+        fits = [(total - v, is_unit) for v, is_unit in ((as_line, False), (as_unit, True)) if v <= total * 1.02]
+        if fits:  # tax and shipping only ever add to the items, so the reading closest to (but not above) the total wins
+            pick_unit = min(fits)[1]
+    for it in items:
+        amt = it.pop("_amt", None)
+        unit_flag = it.pop("_unit", False)
+        if amt is None:
+            continue
+        use_unit = pick_unit if pick_unit is not None else unit_flag
+        it["price"] = round(amt if use_unit else amt / max(1, it["qty"]), 2)
     return items
 
 
@@ -192,16 +235,16 @@ def parse_items(body):
         m = ITEM_A.match(ln)
         if m:
             q, p = int(m.group(1)), float(m.group(3).replace(",", ""))
-            items.append({"name": m.group(2).strip(" -–"), "qty": q, "price": round(p / q, 2) if q else p})
+            items.append({"name": m.group(2).strip(" -–"), "qty": q, "price": round(p / q, 2) if q else p, "_amt": p})
             continue
         m = ITEM_B.match(ln)
         if m:
-            items.append({"name": m.group(1).strip(" -–"), "qty": int(m.group(2)), "price": float(m.group(3).replace(",", ""))})
+            items.append({"name": m.group(1).strip(" -–"), "qty": int(m.group(2)), "price": float(m.group(3).replace(",", "")), "_amt": float(m.group(3).replace(",", "")), "_unit": True})
     if not items:
         for ln in lines:
             m = ITEM_C.match(ln)
             if m and _name_like(m.group(1)):
-                items.append({"name": m.group(1).strip(" -–"), "qty": int(m.group(2)), "price": float(m.group(3).replace(",", ""))})
+                items.append({"name": m.group(1).strip(" -–"), "qty": int(m.group(2)), "price": float(m.group(3).replace(",", "")), "_amt": float(m.group(3).replace(",", "")), "_unit": True})
     if not items:
         items = _loose_items([l for l in lines if l.strip()])
     for i, ln in enumerate(lines):
@@ -254,6 +297,9 @@ def parse_email(sender, subject, body, date_header=None, extra="", default=None)
         d = parsedate_to_datetime(date_header).date().isoformat() if date_header else None
     except Exception:
         d = None
+    money = amounts(body)
+    tot = float(total.replace(",", "")) if total else None
+    items = parse_items(body) if status in ("placed", "shipped", "delivered", "out_for_delivery", "partially_cancelled") else []
+    items = fix_item_prices(items, money["subtotal"], tot)
     return {"retailer": retailer, "order_number": order_no.upper(), "status": status, "date": d or datetime.now().date().isoformat(),
-            "total": float(total.replace(",", "")) if total else None, "tracking": tracking, "carrier": guess_carrier(tracking),
-            "items": parse_items(body) if status in ("placed", "shipped", "delivered", "out_for_delivery", "partially_cancelled") else []}, ""
+            "total": tot, "tracking": tracking, "carrier": guess_carrier(tracking), "items": items, **money}, ""

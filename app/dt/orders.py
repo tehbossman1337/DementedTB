@@ -61,6 +61,7 @@ def apply_event(c, ev, account="", manual=False, announce=True):
                          "manual" if manual else "email", t, t)).lastrowid
         for it in items:
             c.execute("INSERT INTO order_items(order_id,name,qty,unit_price,sku) VALUES(?,?,?,?,?)", (oid, it["name"], it.get("qty", 1), it.get("price", 0), it.get("sku", "")))
+        _keep_money(c, oid, ev)
         log_event(c, oid, ev["status"], "Order added")
         outcome, changed = f"new order ({ev['status']})", True
         if announce:
@@ -85,7 +86,13 @@ def apply_event(c, ev, account="", manual=False, announce=True):
             c.execute("UPDATE orders SET account=? WHERE id=?", (account, oid))
         if ev.get("date") and (not row["order_date"] or ev["status"] == "placed"):
             c.execute("UPDATE orders SET order_date=? WHERE id=?", (ev["date"], oid))
-        if ev.get("items") and not c.execute("SELECT 1 FROM order_items WHERE order_id=?", (oid,)).fetchone():
+        _keep_money(c, oid, ev)
+        old_items = db.rows(c, "SELECT * FROM order_items WHERE order_id=?", (oid,))
+        priced_now = ev.get("items") and all(it.get("price") for it in ev["items"])
+        if old_items and priced_now and not any(i["unit_price"] for i in old_items):
+            c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))  # an earlier email had the items but no prices: keep the priced list
+            old_items = []
+        if ev.get("items") and not old_items:
             for it in ev["items"]:
                 c.execute("INSERT INTO order_items(order_id,name,qty,unit_price,sku) VALUES(?,?,?,?,?)", (oid, it["name"], it.get("qty", 1), it.get("price", 0), it.get("sku", "")))
             prod, qty = _product_summary(ev["items"])
@@ -201,6 +208,16 @@ def save_manual(c, d, oid=None):
     return oid
 
 
+def _keep_money(c, oid, ev):
+    """Remember what the email says the order cost (subtotal, tax, shipping, total). Only fills blanks, so a hand edit is never overwritten."""
+    row = c.execute("SELECT total, subtotal, tax, shipping FROM orders WHERE id=?", (oid,)).fetchone()
+    if not row:
+        return
+    for k in ("total", "subtotal", "tax", "shipping"):
+        if ev.get(k) is not None and row[k] is None:
+            c.execute(f"UPDATE orders SET {k}=? WHERE id=?", (ev[k], oid))
+
+
 def _to_inventory(c, oid):
     """Keep Inventory in step with the tracker: delivered adds stock, leaving Delivered takes it back; every confirmed order gets an info receipt."""
     try:
@@ -209,7 +226,8 @@ def _to_inventory(c, oid):
         if not row:
             return
         if row["status"] == "delivered":
-            inventory.on_delivered(c, oid)
+            if not inventory.on_delivered(c, oid):
+                inventory.recost(c, oid)  # already in inventory: pick up prices a later email brought
         else:
             inventory.on_undelivered(c, oid)
         inventory.receipt_from_order(c, oid)

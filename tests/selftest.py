@@ -606,5 +606,22 @@ _st7 = _ml2.sync_account(_aid7, announce=False)
 check("orders in rule folders are found", _c7.execute("SELECT 1 FROM orders WHERE order_number='102003492819480'").fetchone() is not None
       and _c7.execute("SELECT 1 FROM orders WHERE order_number='2000140-27154038'").fetchone() is not None, _st7)
 
+# prices from the emails flow into inventory cost
+from dt import inventory as _inv8
+_c8 = _d3.connect()
+_ml2.process_message(_c8, "<cost-1>", _RS.SAMPLES[0][0], "me@icloud.com", [], set(), announce=False)
+_ml2.process_message(_c8, "<cost-2>", _RS.SAMPLES[3][0], "me@icloud.com", [], set(), announce=False); _c8.commit()
+_etb = _c8.execute("SELECT qty, purchase_price FROM inv_items WHERE name LIKE '%Prismatic Evolutions Elite Trainer Box' AND notes LIKE 'From order 2000140-27154038%'").fetchone()
+check("item cost = email price plus its share of tax", _etb and _etb["qty"] == 2 and abs(_etb["purchase_price"] - 53.72) < 0.01, _etb and tuple(_etb))
+_ord8 = _c8.execute("SELECT subtotal, tax, shipping, total FROM orders WHERE order_number='2000140-27154038'").fetchone()
+check("order keeps subtotal, tax, shipping and total from the email", tuple(_ord8) == (126.88, 9.52, 0.0, 136.40), tuple(_ord8))
+_ml2.process_message(_c8, "<cost-3>", _RS.SAMPLES[8][0], "me@icloud.com", [], set(), announce=False)
+_ml2.process_message(_c8, "<cost-4>", _RS.SAMPLES[6][0], "me@icloud.com", [], set(), announce=False); _c8.commit()
+_tg = _c8.execute("SELECT name, qty, purchase_price FROM inv_items WHERE notes LIKE 'From order 102003492819473%'").fetchall()
+check("delivered-before-confirmation gets the real price once the confirmation arrives", len(_tg) == 1 and _tg[0]["qty"] == 2 and abs(_tg[0]["purchase_price"] - 29.15) < 0.01, [tuple(x) for x in _tg])
+check("unit vs line prices are told apart", _P.fix_item_prices(_P.parse_items("Elite Trainer Box\nQty: 2\n$49.97"), 99.94)[0]["price"] == 49.97
+      and _P.fix_item_prices(_P.parse_items("Elite Trainer Box\nQty: 2\n$99.94"), 99.94)[0]["price"] == 49.97
+      and _P.fix_item_prices(_P.parse_items("Booster Bundle\nQty: 10\n$29.99"), None, 323.89)[0]["price"] == 29.99)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

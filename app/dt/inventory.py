@@ -12,7 +12,7 @@ from . import db, notify
 
 from .inv_data import DATA
 CATEGORIES = ["Pokemon Card", "Graphics Card"]
-DEFAULTS = {"partner1": "Me", "partner2": "Partner", "aging_days": 90, "drop_pct": 0.15, "monthly_target": 0.0, "big_sale": 0.0, "auto_from_orders": 1, "auto_receipts": 1, "tax_year": 0}
+DEFAULTS = {"partner1": "Me", "partner2": "Partner", "aging_days": 90, "drop_pct": 0.15, "monthly_target": 0.0, "big_sale": 0.0, "auto_from_orders": 1, "auto_receipts": 1, "cost_includes_tax": 1, "tax_year": 0}
 GPU_WORDS = re.compile(r"\b(rtx|gtx|radeon|geforce|gpu|graphics card|video card|nvidia)\b", re.I)
 SKU_RE = re.compile(r"^[A-Z]{2,4}-\d{1,6}$")
 LOCK = threading.RLock()  # anything that picks a new SKU runs under this so two requests can't take the same one
@@ -531,8 +531,7 @@ def on_delivered(c, oid):
     o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
     if not o:
         return None
-    lines = [(i["name"], int(i["qty"] or 1), float(i["unit_price"] or 0)) for i in c.execute("SELECT * FROM order_items WHERE order_id=?", (oid,))] or \
-            [(o["product"] or f"{o['retailer']} order {o['order_number']}", int(o["qty"] or 1), round((o["total"] or 0) / max(1, int(o["qty"] or 1)), 2))]
+    lines, note = landed_costs(c, o)
     last = None
     added = []
     for name, qty, unit in lines:
@@ -547,11 +546,76 @@ def on_delivered(c, oid):
         else:
             last = next_sku(c, cat)
             c.execute("INSERT INTO inv_items(sku,category,name,qty,purchase_date,purchase_price,purchase_source,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                      (last, cat, name[:200], qty, (o["order_date"] or today())[:10], unit, o["retailer"], f"From order {o['order_number']}", now(), now()))
-        added.append([last, qty])
+                      (last, cat, name[:200], qty, (o["order_date"] or today())[:10], unit, o["retailer"], f"From order {o['order_number']} · {note}", now(), now()))
+        added.append([last, qty, unit])
     c.execute("INSERT OR REPLACE INTO inv_order_links(order_id, sku, lines) VALUES(?,?,?)", (oid, last, json.dumps(added)))
     c.commit()
     return last
+
+
+def recost(c, oid):
+    """The order is already in inventory but a later email brought (better) prices: move the item cost to the new figure. Exact for the
+    weighted average, so other orders of the same item keep their share."""
+    link = c.execute("SELECT * FROM inv_order_links WHERE order_id=?", (oid,)).fetchone()
+    o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not link or not o:
+        return False
+    try:
+        old = json.loads(link["lines"] or "[]")
+    except ValueError:
+        return False
+    new, _ = landed_costs(c, o)
+    if len(old) != len(new) or any(len(x) < 3 for x in old) or any(int(x[1]) != n[1] for x, n in zip(old, new)):
+        # the item list itself changed (e.g. the delivered email came before the confirmation): take it out and put it back properly
+        if [n[2] for n in new] == [float(x[2]) for x in old if len(x) > 2] and len(old) == len(new):
+            return False
+        on_undelivered(c, oid)
+        return bool(on_delivered(c, oid))
+    changed = False
+    for (sku, qty, ou), (_, nq, nu) in zip(old, new):
+        if abs(float(ou) - nu) < 0.005 or int(qty) != nq:
+            continue
+        it = c.execute("SELECT qty, purchase_price FROM inv_items WHERE sku=?", (sku,)).fetchone()
+        if not it:
+            continue
+        Q = it["qty"] or 0
+        price = nu if Q <= qty else round((Q * it["purchase_price"] - qty * float(ou) + qty * nu) / Q, 4)
+        c.execute("UPDATE inv_items SET purchase_price=?, updated_at=? WHERE sku=?", (max(0, price), now(), sku))
+        changed = True
+    if changed:
+        c.execute("UPDATE inv_order_links SET lines=? WHERE order_id=?", (json.dumps([[s_, q, nu] for (s_, q, _), (_, _, nu) in zip(old, new)]), oid))
+        c.commit()
+    return changed
+
+
+def landed_costs(c, o):
+    """What each unit really cost, from the prices in the order emails: the item prices, plus the order's tax and shipping shared out by
+    price (turn that off in Fees & settings). With no item prices, the order total is split evenly. Returns ([(name, qty, unit)], note)."""
+    items = [(i["name"], int(i["qty"] or 1), float(i["unit_price"] or 0)) for i in c.execute("SELECT * FROM order_items WHERE order_id=? ORDER BY id", (o["id"],))]
+    total = float(o["total"] or 0)
+    keys = o.keys()
+    sub = float(o["subtotal"] or 0) if "subtotal" in keys else 0
+    tax = float(o["tax"] or 0) if "tax" in keys else 0
+    ship = float(o["shipping"] or 0) if "shipping" in keys else 0
+    include = settings(c).get("cost_includes_tax", 1)
+    if not items:
+        q = max(1, int(o["qty"] or 1))
+        return [(o["product"] or f"{o['retailer']} order {o['order_number']}", q, round(total / q, 4))], f"order total ${total:.2f} split over {q}"
+    line_sum = sum(q * u for _, q, u in items)
+    if line_sum <= 0:  # names and quantities but no prices: split the order total by quantity
+        n = sum(q for _, q, _ in items) or 1
+        return [(nm, q, round(total / n, 4)) for nm, q, _ in items], f"order total ${total:.2f} split over {n}"
+    extra = 0.0
+    if include:
+        if tax or ship:
+            extra = tax + ship
+        elif total and total > line_sum and (not sub or abs(sub - line_sum) <= max(0.05, line_sum * 0.02)):
+            extra = total - line_sum  # tax/shipping not itemised: what the total adds on top of the items
+        if extra > line_sum * 0.5:  # something doesn't add up (gift card, other items…): don't guess
+            extra = 0.0
+    f = (line_sum + extra) / line_sum
+    note = f"${line_sum:.2f} items" + (f" + ${extra:.2f} tax/shipping" if extra else "")
+    return [(nm, q, round(u * f, 4)) for nm, q, u in items], note
 
 
 def _norm(s):
@@ -575,10 +639,17 @@ def on_undelivered(c, oid):
         lines = json.loads(link["lines"] or "[]")
     except ValueError:
         lines = []
-    for sku, qty in lines:
-        it = c.execute("SELECT qty FROM inv_items WHERE sku=?", (sku,)).fetchone()
+    o = c.execute("SELECT order_number FROM orders WHERE id=?", (oid,)).fetchone()
+    for ln in lines:
+        sku, qty = ln[0], ln[1]
+        it = c.execute("SELECT qty, notes FROM inv_items WHERE sku=?", (sku,)).fetchone()
         if it:
-            c.execute("UPDATE inv_items SET qty=?, updated_at=? WHERE sku=?", (max(0, it["qty"] - int(qty)), now(), sku))
+            left = max(0, it["qty"] - int(qty))
+            made_here = o and (it["notes"] or "").startswith(f"From order {o['order_number']}")
+            if left == 0 and made_here and not c.execute("SELECT 1 FROM inv_sales WHERE sku=?", (sku,)).fetchone():
+                c.execute("DELETE FROM inv_items WHERE sku=?", (sku,))  # it only existed because of this order
+            else:
+                c.execute("UPDATE inv_items SET qty=?, updated_at=? WHERE sku=?", (left, now(), sku))
     c.execute("DELETE FROM inv_order_links WHERE order_id=?", (oid,))
     c.commit()
     return True

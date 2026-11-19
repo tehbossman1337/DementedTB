@@ -441,8 +441,11 @@ def _(c, q):
     f = {k: v[0] for k, v in q.items()}
     allrows = arsenal.list_checkouts(c)
     rows = arsenal.filtered(c, f)
+    extra = arsenal.order_rows(c, f)  # tracker orders no bot reported
+    rows = sorted(rows + extra, key=lambda r: r["ts"] or "", reverse=True)
     ls = arsenal.lists(c, archived=True)
-    return {"items": rows, "stats": arsenal.stats(rows), "retailers": sorted({r["retailer"] for r in allrows if r["retailer"]}),
+    return {"items": rows, "stats": arsenal.stats(rows), "from_orders": len(extra), "show_orders": (f.get("orders") or "1") != "0",
+            "retailers": sorted({r["retailer"] for r in allrows if r["retailer"]} | {r["retailer"] for r in extra}),
             "bots": sorted({r["bot"] for r in allrows if r["bot"]} | {b["name"] for b in ls["bots"]}),
             "proxies": sorted({r["proxy_list"] for r in allrows if r["proxy_list"]} | {p["name"] for p in ls["proxy_lists"]}),
             "orders": [{"id": o["id"], "label": f"{o['retailer']} · {o['order_number']}", "retailer": o["retailer"]} for o in db.rows(c, "SELECT id,retailer,order_number FROM orders ORDER BY id DESC LIMIT 300")],

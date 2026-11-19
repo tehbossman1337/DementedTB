@@ -623,5 +623,15 @@ check("unit vs line prices are told apart", _P.fix_item_prices(_P.parse_items("E
       and _P.fix_item_prices(_P.parse_items("Elite Trainer Box\nQty: 2\n$99.94"), 99.94)[0]["price"] == 49.97
       and _P.fix_item_prices(_P.parse_items("Booster Bundle\nQty: 10\n$29.99"), None, 323.89)[0]["price"] == 29.99)
 
+# Arsenal shows tracker orders nobody's bot reported
+from dt import arsenal as _ar9
+_c9 = _d3.connect()
+_rows9 = _ar9.order_rows(_c9, {})
+_wid = _c9.execute("SELECT id FROM orders WHERE order_number='2000140-27154038'").fetchone()[0]
+check("tracker orders appear in Arsenal", any(r["link_order_id"] == _wid and r["kind"] == "order" for r in _rows9))
+check("cancelled orders are left out of Arsenal", not any(r["order"]["status"] in ("cancelled", "refunded") for r in _rows9))
+check("Arsenal order rows can be hidden and respect filters", _ar9.order_rows(_c9, {"orders": "0"}) == [] and _ar9.order_rows(_c9, {"bot": "valor"}) == []
+      and all(r["retailer"] == "Walmart" for r in _ar9.order_rows(_c9, {"retailer": "Walmart"})))
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

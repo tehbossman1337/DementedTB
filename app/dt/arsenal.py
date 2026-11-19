@@ -449,6 +449,37 @@ def filtered(c, f):
     return rows
 
 
+def order_rows(c, f):
+    """Orders from the Order Tracker that no bot checkout has claimed, shown alongside checkouts (so they count for the success pic).
+    Cancelled and refunded orders are left out. Not stored as checkouts: a bot webhook for the same order still links normally."""
+    if (f.get("orders") or "1") == "0" or f.get("bot") or f.get("proxy") or (f.get("match") not in (None, "", "all")):
+        return []
+    taken = {x[0] for x in c.execute("SELECT link_order_id FROM checkouts WHERE link_order_id IS NOT NULL AND match_status='matched' AND deleted_at IS NULL")}
+    out = []
+    for o in db.rows(c, "SELECT * FROM orders WHERE status NOT IN ('cancelled','refunded') ORDER BY COALESCE(order_date, created_at) DESC, id DESC"):
+        if o["id"] in taken:
+            continue
+        ts = (o["order_date"] or o["created_at"] or "")[:10] + " 00:00:00" if len(o["order_date"] or "") <= 10 else o["order_date"]
+        out.append({"id": -o["id"], "kind": "order", "ts": ts, "product": o["product"] or f"{o['retailer']} order", "store": o["retailer"], "retailer": o["retailer"],
+                    "size": "", "qty": int(o["qty"] or 1), "price": round(o["total"] / max(1, int(o["qty"] or 1)), 2) if o["total"] else None, "price_source": "order",
+                    "bot": "", "profile": "", "proxy_list": "", "email": o["account"] or "", "order_number": o["order_number"], "status": "success",
+                    "match_status": "matched", "link_order_id": o["id"], "image": "",
+                    "order": {"id": o["id"], "retailer": o["retailer"], "order_number": o["order_number"], "status": o["status"], "total": o["total"], "account": o["account"]}})
+    q = (f.get("q") or "").lower()
+    if q:
+        out = [r for r in out if q in " ".join(str(r.get(k) or "") for k in ("product", "order_number", "store", "email")).lower()]
+    if f.get("retailer"):
+        out = [r for r in out if r["retailer"] == f["retailer"]]
+    rng = f.get("range") or "all"
+    cut = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(rng)
+    if cut:
+        cutoff = (datetime.now() - timedelta(days=cut)).strftime("%Y-%m-%d")
+        out = [r for r in out if r["ts"][:10] >= cutoff]
+    elif rng == "custom":
+        out = [r for r in out if (not f.get("from") or r["ts"][:10] >= f["from"]) and (not f.get("to") or r["ts"][:10] <= f["to"])]
+    return out
+
+
 def stats(rows):
     spend, seen_orders = 0.0, set()
     for r in rows:

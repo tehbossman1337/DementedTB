@@ -114,6 +114,7 @@ function orderForm(o) {
 }
 
 async function orderDrawer(id) {
+  if (!TR.data) await loadTracking();  // opened from another page (e.g. Arsenal)
   const o = await act(() => api('/api/orders/detail?id=' + id)); if (!o) return;
   const full = TR.data.orders.find(x => x.id === id) || o;
   openDrawer(`<div class="row"><h2 style="margin:0;flex:1">Order ${esc(o.order_number)}</h2><button class="iconbtn" data-dclose>${icon('x', 18)}</button></div>

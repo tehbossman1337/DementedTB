@@ -1,15 +1,16 @@
 /* Arsenal pages + Settings */
-const CO = { q: '', retailer: '', bot: '', proxy: '', range: 'all', from: '', to: '', match: 'all', data: null };
+const CO = { q: '', retailer: '', bot: '', proxy: '', range: 'all', from: '', to: '', match: 'all', orders: true, data: null };
 
 PAGES.checkouts = async function (v) {
   const T = S.tok;
-  v.innerHTML = `<div class="page"><div class="ph"><div><h1>Checkouts</h1><p>Every success webhook scraped from your watched channels, joined to the Order Tracker where the retailer's own email confirms what actually happened.</p></div>
+  v.innerHTML = `<div class="page"><div class="ph"><div><h1>Checkouts</h1><p>Every success webhook scraped from your watched channels, plus the orders your emails confirmed, joined to the Order Tracker where the retailer's own email confirms what actually happened.</p></div>
     <div class="acts"><button class="btn" id="c-pic">${icon('image', 18)} Success pic</button><button class="btn" id="c-exp">Export CSV</button><button class="btn p" id="c-add">Add checkout</button></div></div>
     <div id="c-stats"></div>
     <div class="filters"><input class="inp" id="cq" placeholder="Search order #, product, bot, profile…" style="max-width:380px" value="${esc(CO.q)}">
       <select class="sel" id="cret" style="width:170px"></select><select class="sel" id="cbot" style="width:150px"></select><select class="sel" id="cpx" style="width:180px"></select></div>
     <div class="row wrap" style="margin-bottom:18px;gap:16px"><div class="chips" id="crange">${[['all', 'All'], ['24h', '24h'], ['7d', '7d'], ['30d', '30d'], ['90d', '90d'], ['custom', 'Custom']].map(([k, l]) => `<button data-r="${k}" class="${CO.range === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <span id="ccust" class="row ${CO.range === 'custom' ? '' : 'hidden'}"><input type="date" class="inp" id="cfrom" style="width:150px" value="${CO.from}"><span class="muted">to</span><input type="date" class="inp" id="cto" style="width:150px" value="${CO.to}"></span>
+      <label class="tog" style="margin:0"><span class="sw"><input type="checkbox" id="c-ord" ${CO.orders ? 'checked' : ''}><i></i></span>Include orders from Tracking</label>
       <div class="chips" id="cmatch">${[['all', 'All'], ['unmatched', 'Unmatched'], ['matched', 'Matched'], ['suggested', 'Suggested'], ['rejected', 'Rejected']].map(([k, l]) => `<button data-m="${k}" class="${CO.match === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     <div id="c-list"></div></div>`;
   let t; const redraw = () => { clearTimeout(t); t = setTimeout(loadCheckouts, 120); };
@@ -18,6 +19,7 @@ PAGES.checkouts = async function (v) {
   $('#crange').onclick = e => { const b = e.target.closest('[data-r]'); if (!b) return; CO.range = b.dataset.r; $$('#crange button').forEach(x => x.classList.toggle('on', x === b)); $('#ccust').classList.toggle('hidden', CO.range !== 'custom'); loadCheckouts(); };
   $('#cfrom').onchange = e => { CO.from = e.target.value; loadCheckouts(); }; $('#cto').onchange = e => { CO.to = e.target.value; loadCheckouts(); };
   $('#cmatch').onclick = e => { const b = e.target.closest('[data-m]'); if (!b) return; CO.match = b.dataset.m; $$('#cmatch button').forEach(x => x.classList.toggle('on', x === b)); loadCheckouts(); };
+  $('#c-ord').onchange = e => { CO.orders = e.target.checked; loadCheckouts(); };
   $('#c-add').onclick = () => checkoutForm();
   $('#c-pic').onclick = () => successPic();
   $('#c-exp').onclick = async () => { const r = await act(() => api('/api/arsenal/export', {})); if (r) toast('Saved to ' + r.path); };
@@ -25,7 +27,7 @@ PAGES.checkouts = async function (v) {
 };
 
 async function loadCheckouts() {
-  const qs = new URLSearchParams({ q: CO.q, retailer: CO.retailer, bot: CO.bot, proxy: CO.proxy, range: CO.range, from: CO.from, to: CO.to, match: CO.match });
+  const qs = new URLSearchParams({ q: CO.q, retailer: CO.retailer, bot: CO.bot, proxy: CO.proxy, range: CO.range, from: CO.from, to: CO.to, match: CO.match, orders: CO.orders ? 1 : 0 });
   const d = await api('/api/arsenal/checkouts?' + qs); if (S.route !== 'checkouts' || !$('#c-list')) return; CO.data = d; const st = d.stats;
   const fill = (id, label, list, cur) => { const s = $('#' + id); if (!s) return; s.innerHTML = `<option value="">${label}</option>` + list.map(x => `<option ${cur === x ? 'selected' : ''}>${esc(x)}</option>`).join(''); };
   fill('cret', 'All retailers', d.retailers, CO.retailer); fill('cbot', 'All bots', d.bots, CO.bot); fill('cpx', 'All proxy lists', d.proxies, CO.proxy);
@@ -43,13 +45,18 @@ async function loadCheckouts() {
   }
   L.innerHTML = `<div class="card" style="padding:8px 24px 14px"><div class="tbl-wrap"><table class="t" id="co-t"><thead><tr><th>Product</th><th>Store</th><th>Bot</th><th>Proxy list</th><th>Price</th><th>Qty</th><th>Date</th><th>Match</th><th></th></tr></thead><tbody>
     ${d.items.map(r => `<tr data-id="${r.id}"><td class="p"><div class="pcell">${r.image ? `<div class="pb"><img src="${esc(r.image)}" onerror="this.parentNode.innerHTML='${esc((r.store || '?')[0])}'"></div>` : `<div class="pb" style="background:#2a2a38;color:#cfd0dc">${esc((r.store || r.product || '?')[0].toUpperCase())}</div>`}<div><div>${esc(r.product)}</div>${r.size ? `<div class="muted small">Size ${esc(r.size)}</div>` : ''}</div></div></td>
-    <td>${esc(r.store || '—')}</td><td>${esc(r.bot || '—')}</td><td>${esc(r.proxy_list || '—')}</td>
+    <td>${esc(r.store || '—')}</td><td>${r.kind === 'order' ? '<span class="tag">From Tracking</span>' : esc(r.bot || '—')}</td><td>${esc(r.proxy_list || '—')}</td>
     <td style="font-weight:600">${r.price == null ? '<span class="muted">Unpriced</span>' : money(r.price)}${r.price_source === 'rule' ? '<span class="tag">From your price rule</span>' : ''}</td><td>${r.qty}</td><td>${fdt(r.ts)}</td>
     <td>${pill(r.match_status, r.match_status[0].toUpperCase() + r.match_status.slice(1))}${r.order ? `<div class="mono dim" style="margin-top:3px">${esc(r.order.order_number)}</div>` : ''}</td>
     <td><button class="iconbtn" data-menu>${icon('dots', 18)}</button></td></tr>`).join('')}</tbody></table></div></div>`;
   $$('#co-t tbody tr').forEach(tr => {
     const r = d.items.find(x => x.id == tr.dataset.id);
     tr.onclick = e => { if (!e.target.closest('[data-menu]')) checkoutForm(r); };
+    if (r.kind === 'order') {  // an order from Tracking (no bot reported it): open it there
+      tr.onclick = e => { if (!e.target.closest('[data-menu]')) orderDrawer(r.link_order_id); };
+      $('[data-menu]', tr).onclick = e => menu(e, [{ label: 'Open order', fn: () => orderDrawer(r.link_order_id) }, { label: 'Add as a checkout…', fn: () => checkoutForm({ product: r.product, store: r.store, qty: r.qty, price: r.price, order_number: r.order_number, email: r.email, ts: r.ts }) }]);
+      return;
+    }
     $('[data-menu]', tr).onclick = e => menu(e, [
       { label: 'Edit…', fn: () => checkoutForm(r) },
       ...(r.match_status === 'suggested' ? [{ label: 'Confirm suggested order', fn: () => matchAct(r, 'confirm') }, { label: 'Not this order', fn: () => matchAct(r, 'reject') }] : []),
@@ -73,7 +80,7 @@ function setPicture(r) {
 }
 function checkoutForm(r) {
   const d = CO.data || {}, e = r || {};
-  modal(`<h2>${r ? 'Edit checkout' : 'Add checkout'}</h2><p>${r ? 'Correcting the bot or proxy list here stops name mappings from changing this row.' : 'Log a checkout by hand.'}</p>
+  modal(`<h2>${r && r.id ? 'Edit checkout' : 'Add checkout'}</h2><p>${r && r.id ? 'Correcting the bot or proxy list here stops name mappings from changing this row.' : 'Log a checkout by hand.'}</p>
    <div class="fld"><label class="f">Product</label><input class="inp" id="cp" value="${esc(e.product || '')}"></div>
    <div class="col2"><div class="fld"><label class="f">Store</label><input class="inp" id="cs" list="cl-s" value="${esc(e.store || '')}"><datalist id="cl-s">${(d.retailers || []).map(x => `<option>${esc(x)}`).join('')}</datalist></div><div class="fld"><label class="f">Price each ($) — blank = unpriced</label><input class="inp" id="cpr" value="${e.price ?? ''}"></div></div>
    <div class="col2"><div class="fld"><label class="f">Quantity</label><input class="inp" id="cq2" type="number" min="1" value="${e.qty || 1}"></div><div class="fld"><label class="f">Size</label><input class="inp" id="csz" value="${esc(e.size || '')}"></div></div>

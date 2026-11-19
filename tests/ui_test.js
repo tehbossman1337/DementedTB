@@ -27,7 +27,7 @@ let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log('FAIL:', m)
   await p.locator('#ttable tbody tr').first().click(); await p.waitForSelector('#drawer:not(.hidden) .tl'); await p.screenshot({ path: OUT + '/order-drawer.png' }); await p.keyboard.press('Escape');
   await p.click('#tadd'); await p.fill('#fr', 'Best Buy'); await p.fill('#fn', 'BBY-777777'); await p.fill('#fp', 'Manual thing'); await p.fill('#ft', '12.5'); await p.click('#fsave');
   await p.waitForFunction(() => document.querySelectorAll('#ttable tbody tr').length === 6); ok(true, 'manual order added');
-  await nav('attention', '.card[data-id]'); ok(await p.locator('.card[data-id]').count() === 1, 'attention item');
+  ok(await p.locator('[data-nav="attention"]').count() === 0, 'Needs attention left the sidebar'); await nav('email', '#m-rules'); await p.click('#m-rules'); await p.waitForSelector('.card[data-id]'); ok(await p.locator('.card[data-id]').count() === 1, 'attention item');
   await p.click('[data-dis]'); await p.waitForSelector('.empty.plain'); ok(/Nothing needs/.test(await p.textContent('.empty.plain')), 'attention cleared');
   await nav('email', '.item[data-id]'); ok(/Live/.test(await p.textContent('.item[data-id]')), 'account live text');
   await p.click('#m-add'); await p.waitForSelector('.seg'); await p.screenshot({ path: OUT + '/email-add.png' });

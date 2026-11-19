@@ -37,8 +37,10 @@ if os.environ.get("SEED", "1") == "1":
     FI.add(FI.make("Walmart <help@walmart.com>", "Delivered: Charizard Collection", "Your package was delivered to the front door.", to="after.innings.07@icloud.com", when=now - 86400 * 4), flags=["\\Seen", "\\Flagged"])
     import retail_samples as RS
     FI.add(RS.SAMPLES[0][0].as_bytes(), flags=["\\Seen"])  # a Walmart order confirmation
+    FI.add(RS.RELAYED[0][0].as_bytes(), "Target")  # filed into a "Target" folder by a mail rule
     while inbox.STATE['checking']:
         time.sleep(0.1)
+    inbox._FOLDERS.clear()
     inbox.check_all()
     if os.environ.get("INBOX_LIVE") == "1":  # the UI test checks that new mail shows up on its own
         inbox.INTERVAL = 3

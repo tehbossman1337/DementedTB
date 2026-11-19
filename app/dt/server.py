@@ -125,7 +125,7 @@ def _(c, q):
 @get("/api/inbox")
 def _(c, q):
     g = lambda k, d="": (q.get(k) or [d])[0]
-    return {**inbox.list_messages(c, int(g("account", "0") or 0), g("q"), g("unread") == "1", g("flagged") == "1", int(g("limit", "300")), int(g("offset", "0"))),
+    return {**inbox.list_messages(c, int(g("account", "0") or 0), g("q"), g("unread") == "1", g("flagged") == "1", int(g("limit", "300")), int(g("offset", "0")), g("folder")),
             "summary": inbox.summary(c)}
 
 
@@ -136,42 +136,43 @@ def _(c, q):
 
 @get("/api/inbox/message")
 def _(c, q):
-    return inbox.open_message(c, int(q["account"][0]), int(q["uid"][0]), (q.get("images") or ["0"])[0] == "1")
+    return inbox.open_message(c, int(q["account"][0]), int(q["uid"][0]), (q.get("images") or ["0"])[0] == "1", folder=(q.get("folder") or ["INBOX"])[0])
 
 
 @post("/api/inbox/flags")
 def _(c, b):
-    inbox.set_flags(c, int(b["account"]), b.get("uids") or [], b.get("flag") or "seen", bool(b.get("on")))
+    inbox.set_flags(c, int(b["account"]), b.get("uids") or [], b.get("flag") or "seen", bool(b.get("on")), b.get("folder") or "INBOX")
     return {"ok": True}
 
 
 @post("/api/inbox/delete")
 def _(c, b):
-    inbox.delete(c, int(b["account"]), b.get("uids") or [])
+    inbox.delete(c, int(b["account"]), b.get("uids") or [], b.get("folder") or "INBOX")
     return {"ok": True}
 
 
 @post("/api/inbox/check")
 def _(c, b):
+    inbox._FOLDERS.clear()  # "check now" also picks up folders made a moment ago
     threading.Thread(target=inbox.check_all, daemon=True).start()
     return {"ok": True}
 
 
 @get("/api/inbox/order")
 def _(c, q):
-    return inbox.read_as_order(c, int(q["account"][0]), int(q["uid"][0]))
+    return inbox.read_as_order(c, int(q["account"][0]), int(q["uid"][0]), (q.get("folder") or ["INBOX"])[0])
 
 
 @post("/api/inbox/order")
 def _(c, b):
-    return inbox.add_as_order(c, int(b["account"]), int(b["uid"]))
+    return inbox.add_as_order(c, int(b["account"]), int(b["uid"]), b.get("folder") or "INBOX")
 
 
 @post("/api/inbox/save")
 def _(c, b):
     """Save the original email (.eml) to Downloads, e.g. to send it in when an order email isn't read right."""
-    raw = inbox.raw_message(c, int(b["account"]), int(b["uid"]))
-    m = c.execute("SELECT subject FROM inbox_msgs WHERE account_id=? AND uid=?", (int(b["account"]), int(b["uid"]))).fetchone()
+    raw = inbox.raw_message(c, int(b["account"]), int(b["uid"]), b.get("folder") or "INBOX")
+    m = c.execute("SELECT subject FROM inbox_msgs WHERE account_id=? AND folder=? AND uid=?", (int(b["account"]), b.get("folder") or "INBOX", int(b["uid"]))).fetchone()
     name = re.sub(r'[\\/:*?"<>|]+', "_", (m["subject"] if m else "") or "email").strip()[:80] or "email"
     folder = os.path.join(os.path.expanduser("~"), "Downloads")
     os.makedirs(folder, exist_ok=True)
@@ -186,7 +187,7 @@ def _(c, b):
 @post("/api/inbox/attachment")
 def _(c, b):
     """Save an attachment to Downloads and open it."""
-    name, ctype, data = inbox.attachment(c, int(b["account"]), int(b["uid"]), int(b["idx"]))
+    name, ctype, data = inbox.attachment(c, int(b["account"]), int(b["uid"]), int(b["idx"]), b.get("folder") or "INBOX")
     folder = os.path.join(os.path.expanduser("~"), "Downloads")
     os.makedirs(folder, exist_ok=True)
     safe = re.sub(r'[\\/:*?"<>|]+', "_", name).strip() or "attachment"

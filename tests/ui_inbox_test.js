@@ -6,8 +6,15 @@ const [, , APP, KEY, OUT] = process.argv; let fails = 0; const ok = (c, m) => { 
   p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => { errs.push('dialog: ' + d.message()); d.dismiss(); });
   await p.goto(APP); await p.fill('#lk', KEY); await p.click('#lgo'); await p.waitForSelector('#app:not(.hidden)');
   await p.click('[data-nav="inbox"]'); await p.waitForSelector('.ib-row');
-  ok(await p.locator('.ib-row').count() === 5, 'five messages listed, got ' + await p.locator('.ib-row').count());
-  ok(await p.locator('.ib-row.new').count() === 1, 'one unread');
+  ok(await p.locator('.ib-row').count() === 6, 'six messages listed (inbox + Target folder), got ' + await p.locator('.ib-row').count());
+  ok(await p.locator('.ib-row.new').count() === 2, 'two unread');
+  ok(await p.locator('.ib-fl >> text=Target').count() === 1, 'folder tag on the Target message');
+  await p.click('.ib-fold >> text=Target'); await p.waitForTimeout(500);
+  ok(await p.locator('.ib-row').count() === 1, 'Target folder shows its one message');
+  await p.click('.ib-row'); await p.waitForSelector('[data-x="order"]'); await p.click('[data-x="order"]');
+  await p.waitForSelector('.ib-ordbar >> text=102003492819480').catch(() => ok(false, 'order reader on a folder message'));
+  await p.screenshot({ path: OUT + '/inbox-folder.png' });
+  await p.click('#ib-boxes [data-a="0"]'); await p.waitForTimeout(500);
   ok((await p.textContent('.ib-list')).includes('honker.wintry-0n@icloud.com'), 'hide-my-email alias shown');
   await p.screenshot({ path: OUT + '/inbox-list.png' });
   await p.click('.ib-row.new'); await p.waitForSelector('.ib-head');

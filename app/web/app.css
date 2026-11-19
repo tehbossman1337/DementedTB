@@ -262,3 +262,4 @@ input[type=checkbox].ck:checked:after{content:"";position:absolute;left:5px;top:
 .ib-empty p{color:var(--muted);line-height:1.6}
 @media (max-width:1180px){.ib-grid{grid-template-columns:180px 300px 1fr}}
 .ib-ordbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 24px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}.ib-ordbar b{color:var(--text);font-weight:600}
+.ib-boxes button.ib-fold{padding-left:22px;font-size:13px}.ib-fl{display:inline-block;border:1px solid var(--line2);border-radius:5px;padding:0 5px;margin-right:6px;font-size:11px;color:var(--muted)}

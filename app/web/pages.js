@@ -181,7 +181,7 @@ PAGES.email = async function (v) {
   const d = await api('/api/mail/accounts'); S.mail = d;
   if (T !== S.tok) return;
   v.innerHTML = `<div class="page"><div class="ph"><div><h1>Email accounts</h1><p>Every connected inbox is watched live. Orders are matched across inboxes, so forwarded copies don't double up.</p></div>
-    <div class="acts"><button class="btn" id="m-eml">Import .eml files</button><button class="btn" id="m-sync">Sync now</button><button class="btn" id="m-back">Backfill all</button><button class="btn" id="m-out">Add Outlook</button><button class="btn p" id="m-add">Add accounts</button></div></div>
+    <div class="acts"><button class="btn" id="m-rules" title="Emails the reader could not place, and your sender rules">Sender rules</button><button class="btn" id="m-eml">Import .eml files</button><button class="btn" id="m-sync">Sync now</button><button class="btn" id="m-back">Backfill all</button><button class="btn" id="m-out">Add Outlook</button><button class="btn p" id="m-add">Add accounts</button></div></div>
     ${d.sync.running ? `<div class="card" style="padding:14px 20px"><div class="row"><span class="spin"></span><span>Syncing… <span class="muted small">${esc(d.sync.log.slice(-1)[0] || '')}</span></span></div></div>` : ''}
     ${d.accounts.length ? d.accounts.map(a => `<div class="item big" data-id="${a.id}"><span class="dot ${!a.enabled ? '' : a.last_error ? 'r' : a.live ? 'g' : 'a'}"></span>
       <div><div class="t" style="font-size:17px">${esc(a.email)}</div><div class="s">${esc(a.description)}</div></div>
@@ -196,6 +196,7 @@ PAGES.email = async function (v) {
   $('#m-back').onclick = async () => { if (await confirmBox('Backfill all inboxes?', 'Re-reads every email in every connected inbox from the beginning. Safe to repeat — nothing is duplicated and deleted orders stay hidden. It can take a while on a big mailbox.', 'Backfill')) sync(true); };
   $('#m-add').onclick = () => accountModal(); const a2 = $('#m-add2'); if (a2) a2.onclick = () => accountModal();
   $('#m-out').onclick = () => accountModal(null, 'outlook');
+  $('#m-rules').onclick = () => go('attention');
   $('#m-eml').onclick = async () => { const fs = await pickFiles('.eml'); if (!fs.length) return; const files = await Promise.all(fs.map(async f => ({ name: f.name, text: await readText(f) }))); const r = await act(() => api('/api/mail/import_eml', { files })); if (r) { toast(`Read ${r.files} email${r.files === 1 ? '' : 's'}: ${r.orders} order${r.orders === 1 ? '' : 's'}, ${r.attention} need attention, ${r.skipped} skipped`); pollShell(); refreshPage(); } };
   $('#own-b').onclick = async () => { if (await act(() => api('/api/mail/own/add', { address: $('#own-i').value }), 'Added')) refreshPage(); };
   $$('[data-own]', v).forEach(b => b.onclick = async () => { await act(() => api('/api/mail/own/remove', { address: b.dataset.own })); refreshPage(); });

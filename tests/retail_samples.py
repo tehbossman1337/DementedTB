@@ -108,7 +108,15 @@ RELAYED = [
     (_msg("Best Buy <BestBuyInfo_at_emailinfo_bestbuy_com_9zz1q8@icloud.com>", "Your order has shipped", _html("Shipped", ["Your order has shipped", "Order #BBY01-806123456799"]), T0),
      {"retailer": "Best Buy", "order_number": "BBY01-806123456799", "status": "shipped"}),
 ]
-SAMPLES = SAMPLES + RELAYED
+# Laid out like a real Target confirmation (order number starting with 9, shown as a link in the red header bar).
+REAL_TARGET = [
+    (_msg("Target <orders@oe1.target.com>", "Thanks for shopping with us! Here's your order #: 902003976659447.", _html("Thanks for shopping with us! Here's your order #: 902003976659447.", [
+        '<table><tr><td><img src="https://target.scene7.com/bullseye.png" alt=""></td><td align="right"><a href="https://click.oe1.target.com/?qs=1">Order #902003976659447</a></td></tr></table>',
+        "<h1>Thanks for your order, Charles!</h1>", "Placed November 19, 2026", "Now just sit back while we get to work. We’ll send you an email when tracking info is available.",
+        _item("Pokémon Trading Card Game: Ascended Heroes Ultra Premium Collection", 1, "119.99"), "Subtotal $119.99", "Estimated tax $9.60", "Total $129.59"]), T0),
+     {"retailer": "Target", "order_number": "902003976659447", "status": "placed", "total": 129.59, "items": 1}),
+]
+SAMPLES = SAMPLES + RELAYED + REAL_TARGET
 
 # Marketing mail from the same retailers must not become orders or land in Needs attention.
 NEGATIVE = [

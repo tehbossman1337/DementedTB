@@ -1,5 +1,5 @@
 /* ================================================================ Inbox: every connected mailbox in one list, checked every 20 seconds */
-const IB = { account: 0, q: '', unread: false, sel: null, data: null, rev: -1, timer: null, images: {}, open: null };
+const IB = { account: 0, folder: '', q: '', unread: false, sel: null, data: null, rev: -1, timer: null, images: {}, open: null };
 const ibTime = ts => {
   const d = new Date(ts * 1000), now = new Date();
   if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -9,10 +9,12 @@ const ibTime = ts => {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
 };
 const ibAgo = ts => { if (!ts) return 'not checked yet'; const s = Math.max(0, Math.round(Date.now() / 1000 - ts)); return s < 5 ? 'just now' : s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
+const ibKey = m => m.account_id + '|' + encodeURIComponent(m.folder) + '|' + m.uid;
+const ibParse = k => { const [a, f, u] = k.split('|'); return { aid: +a, folder: decodeURIComponent(f), uid: +u }; };
 const ibInitials = m => ((m.from_name || m.from_addr || '?').replace(/[^A-Za-z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('') || '?').toUpperCase();
 
 async function ibLoad() {
-  const qs = new URLSearchParams({ account: IB.account || 0, q: IB.q, unread: IB.unread ? 1 : 0 });
+  const qs = new URLSearchParams({ account: IB.account || 0, folder: IB.folder, q: IB.q, unread: IB.unread ? 1 : 0 });
   IB.data = await api('/api/inbox?' + qs);
   IB.rev = IB.data.rev;
   return IB.data;
@@ -40,8 +42,10 @@ PAGES.inbox = async function (v) {
     <div class="ib-grid"><nav class="ib-boxes" id="ib-boxes"></nav><div class="ib-list" id="ib-list"></div><section class="ib-read" id="ib-read"></section></div></div>`;
   const drawBoxes = () => {
     const s = IB.data.summary;
-    $('#ib-boxes').innerHTML = `<button data-a="0" class="${IB.account ? '' : 'on'}"><span>All inboxes</span>${s.unread ? `<em>${s.unread}</em>` : ''}</button>
-      ${s.accounts.map(a => `<button data-a="${a.id}" class="${IB.account === a.id ? 'on' : ''}" title="${esc(a.error || a.email)}"><span>${esc(a.email)}</span>${a.error ? '<i class="ib-err"></i>' : a.unread ? `<em>${a.unread}</em>` : ''}</button>`).join('')}`;
+    const one = s.accounts.length === 1;
+    $('#ib-boxes').innerHTML = `<button data-a="0" class="${IB.account || IB.folder ? '' : 'on'}"><span>All mail</span>${s.unread ? `<em>${s.unread}</em>` : ''}</button>
+      ${s.accounts.map(a => `<button data-a="${a.id}" class="${IB.account === a.id && !IB.folder ? 'on' : ''}" title="${esc(a.error || a.email)}"><span>${esc(a.email)}</span>${a.error ? '<i class="ib-err"></i>' : a.unread ? `<em>${a.unread}</em>` : ''}</button>
+        ${(one || IB.account === a.id) ? a.folders.map(f => `<button class="ib-fold ${IB.account === a.id && IB.folder === f.name ? 'on' : ''}" data-a="${a.id}" data-f="${esc(encodeURIComponent(f.name))}"><span>${esc(f.label)}</span>${f.unread ? `<em>${f.unread}</em>` : ''}</button>`).join('') : ''}`).join('')}`;
     $('#ib-sub').textContent = `${IB.data.total} message${IB.data.total === 1 ? '' : 's'} · checked ${ibAgo(s.last)} · checks every ${s.interval} seconds`;
   };
   const drawList = () => {
@@ -51,27 +55,27 @@ PAGES.inbox = async function (v) {
       L.innerHTML = `<div class="ib-none">${loading ? '<span class="spin"></span> Loading your mail…' : IB.q || IB.unread ? 'Nothing matches.' : 'No mail yet.'}</div>`; return;
     }
     L.innerHTML = ms.map(m => {
-      const key = m.account_id + ':' + m.uid, alias = m.to_addr && !m.to_addr.includes(m.account) ? m.to_addr.split(',')[0] : '';
-      return `<div class="ib-row ${m.seen ? '' : 'new'} ${IB.sel === key ? 'on' : ''}" data-k="${key}">
+      const key = ibKey(m), alias = m.to_addr && !m.to_addr.includes(m.account) ? m.to_addr.split(',')[0] : '';
+      return `<div class="ib-row ${m.seen ? '' : 'new'} ${IB.sel === key ? 'on' : ''}" data-k="${esc(key)}">
         <div class="ib-av">${esc(ibInitials(m))}</div>
         <div class="ib-mid"><div class="ib-l1"><b>${esc(m.from_name || m.from_addr)}</b><span class="ib-t">${m.flagged ? `<span class="ib-flag">${icon('flag', 13)}</span>` : ''}${m.attach ? icon('clip', 13) : ''}${ibTime(m.ts)}</span></div>
           <div class="ib-subj">${esc(m.subject || '(no subject)')}</div>
           <div class="ib-snip">${esc(m.snippet)}</div>
-          ${alias || (multi && !IB.account) ? `<div class="ib-to">${esc(alias || m.account)}</div>` : ''}</div></div>`;
+          ${alias || (multi && !IB.account) || (!IB.folder && m.folder.toUpperCase() !== 'INBOX') ? `<div class="ib-to">${!IB.folder && m.folder.toUpperCase() !== 'INBOX' ? `<span class="ib-fl">${esc(m.folder_label)}</span>` : ''}${esc(alias || (multi && !IB.account ? m.account : ''))}</div>` : ''}</div></div>`;
     }).join('');
   };
   const drawReader = async () => {
     const R = $('#ib-read');
     if (!IB.sel) { R.innerHTML = `<div class="ib-none ib-pick">${icon('mail')}<span>Select a message to read it</span></div>`; return; }
-    const [aid, uid] = IB.sel.split(':').map(Number), meta = IB.data.messages.find(m => m.account_id === aid && m.uid === uid) || {};
+    const sel = IB.sel, { aid, folder, uid } = ibParse(sel), meta = IB.data.messages.find(m => ibKey(m) === sel) || {}, F = encodeURIComponent(folder);
     R.innerHTML = `<div class="ib-none"><span class="spin"></span></div>`;
     let m;
-    try { m = await api(`/api/inbox/message?account=${aid}&uid=${uid}&images=${IB.images[IB.sel] ? 1 : 0}`); }
-    catch (x) { if (IB.sel === aid + ':' + uid) R.innerHTML = `<div class="ib-none">${esc(x.message)}</div>`; return; }
-    if (IB.sel !== aid + ':' + uid) return;
+    try { m = await api(`/api/inbox/message?account=${aid}&folder=${F}&uid=${uid}&images=${IB.images[sel] ? 1 : 0}`); }
+    catch (x) { if (IB.sel === sel) R.innerHTML = `<div class="ib-none">${esc(x.message)}</div>`; return; }
+    if (IB.sel !== sel) return;
     IB.open = m;
-    if (!meta.seen && meta.uid) { meta.seen = 1; const row = $(`.ib-row[data-k="${IB.sel}"]`); if (row) row.classList.remove('new'); }
-    const allowImg = IB.images[IB.sel];
+    if (!meta.seen && meta.uid) { meta.seen = 1; const row = $(`.ib-row[data-k="${CSS.escape(sel)}"]`); if (row) row.classList.remove('new'); }
+    const allowImg = IB.images[sel];
     const csp = `default-src 'none'; style-src 'unsafe-inline' https: http:; font-src https: http: data:; img-src data: cid:${allowImg ? ' https: http:' : ''}`;
     const doc = m.kind === 'html'
       ? `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>body{margin:0;padding:22px 26px;font-family:-apple-system,"Segoe UI",system-ui,sans-serif;font-size:14px;color:#1d1d24;background:#fff;word-wrap:break-word}img{max-width:100%;height:auto}table{max-width:100%!important}a{color:#c8213f}${allowImg ? '' : 'img[src^="http"],img[src^="//"]{visibility:hidden}'}</style></head><body>${m.body}</body></html>`
@@ -87,15 +91,15 @@ PAGES.inbox = async function (v) {
     $('.ib-frame', R).srcdoc = doc;
     R.onclick = async e => {
       const b = e.target.closest('[data-x],[data-att]'); if (!b) return;
-      if (b.dataset.att) { const r = await act(() => api('/api/inbox/attachment', { account: aid, uid, idx: +b.dataset.att, open: true })); if (r) toast('Saved to ' + r.path); return; }
+      if (b.dataset.att) { const r = await act(() => api('/api/inbox/attachment', { account: aid, folder, uid, idx: +b.dataset.att, open: true })); if (r) toast('Saved to ' + r.path); return; }
       const x = b.dataset.x;
-      if (x === 'img') { IB.images[IB.sel] = true; drawReader(); }
-      if (x === 'unread') { await act(() => api('/api/inbox/flags', { account: aid, uids: [uid], flag: 'seen', on: false })); meta.seen = 0; IB.sel = null; await refresh(); }
-      if (x === 'flag') { await act(() => api('/api/inbox/flags', { account: aid, uids: [uid], flag: 'flagged', on: !meta.flagged })); meta.flagged = meta.flagged ? 0 : 1; drawList(); drawReader(); }
-      if (x === 'del') del(aid, uid);
+      if (x === 'img') { IB.images[sel] = true; drawReader(); }
+      if (x === 'unread') { await act(() => api('/api/inbox/flags', { account: aid, folder, uids: [uid], flag: 'seen', on: false })); meta.seen = 0; IB.sel = null; await refresh(); }
+      if (x === 'flag') { await act(() => api('/api/inbox/flags', { account: aid, folder, uids: [uid], flag: 'flagged', on: !meta.flagged })); meta.flagged = meta.flagged ? 0 : 1; drawList(); drawReader(); }
+      if (x === 'del') del(sel);
       if (x === 'order') {
         const box = $('#ib-ord'); box.innerHTML = '<div class="ib-ordbar"><span class="spin"></span></div>';
-        let r; try { r = await api(`/api/inbox/order?account=${aid}&uid=${uid}`); } catch (e) { box.innerHTML = `<div class="ib-ordbar">${esc(e.message)}</div>`; return; }
+        let r; try { r = await api(`/api/inbox/order?account=${aid}&folder=${F}&uid=${uid}`); } catch (e) { box.innerHTML = `<div class="ib-ordbar">${esc(e.message)}</div>`; return; }
         const ev = r.event, st = TR.data && TR.data.statuses || {};
         box.innerHTML = ev
           ? `<div class="ib-ordbar"><div><b>${esc(ev.retailer)}</b> · order ${esc(ev.order_number)} · ${esc((st[ev.status] || ev.status).replace('_', ' '))}${ev.total ? ' · ' + money(ev.total) : ''}${ev.items.length ? ` · ${ev.items.reduce((a, i) => a + i.qty, 0)} item${ev.items.reduce((a, i) => a + i.qty, 0) > 1 ? 's' : ''}` : ''}${ev.tracking ? ' · ' + esc(ev.tracking) : ''}
@@ -104,13 +108,13 @@ PAGES.inbox = async function (v) {
           : `<div class="ib-ordbar"><div>The order tracker can't read this as an order: <b>${esc(r.reason)}</b>${r.retailer_guess ? ` (looks like ${esc(r.retailer_guess)})` : ''}
                <div class="muted small">Save the email file and send it in so this format can be added.</div></div><button class="btn sm" data-x="eml">Save email file</button></div>`;
       }
-      if (x === 'addord') { const r = await act(() => api('/api/inbox/order', { account: aid, uid })); if (r) { toast('Tracking: ' + r.outcome); TR.data = null; pollShell(); $('[data-x="order"]').click(); } }
-      if (x === 'eml') { const r = await act(() => api('/api/inbox/save', { account: aid, uid })); if (r) toast('Saved to ' + r.path); }
+      if (x === 'addord') { const r = await act(() => api('/api/inbox/order', { account: aid, folder, uid })); if (r) { toast('Tracking: ' + r.outcome); TR.data = null; pollShell(); $('[data-x="order"]').click(); } }
+      if (x === 'eml') { const r = await act(() => api('/api/inbox/save', { account: aid, folder, uid })); if (r) toast('Saved to ' + r.path); }
     };
   };
-  const del = async (aid, uid) => {
-    const i = IB.data.messages.findIndex(m => m.account_id === aid && m.uid === uid), next = IB.data.messages[i + 1] || IB.data.messages[i - 1];
-    if (await act(() => api('/api/inbox/delete', { account: aid, uids: [uid] }), 'Moved to Deleted Messages')) { IB.sel = next ? next.account_id + ':' + next.uid : null; await refresh(); }
+  const del = async k => {
+    const { aid, folder, uid } = ibParse(k), i = IB.data.messages.findIndex(m => ibKey(m) === k), next = IB.data.messages[i + 1] || IB.data.messages[i - 1];
+    if (await act(() => api('/api/inbox/delete', { account: aid, folder, uids: [uid] }), 'Moved to Deleted Messages')) { IB.sel = next ? ibKey(next) : null; await refresh(); }
   };
   const refresh = async (quiet) => {
     const L = $('#ib-list'); if (!L) return; const top = L.scrollTop;
@@ -119,7 +123,7 @@ PAGES.inbox = async function (v) {
     if (!quiet || (IB.sel && !$('#ib-read .ib-head'))) drawReader();
   };
   drawBoxes(); drawList(); drawReader();
-  $('#ib-boxes').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; IB.account = +b.dataset.a; IB.sel = null; refresh(); };
+  $('#ib-boxes').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; IB.account = +b.dataset.a; IB.folder = b.dataset.f ? decodeURIComponent(b.dataset.f) : ''; IB.sel = null; refresh(); };
   $('#ib-list').onclick = e => { const r = e.target.closest('.ib-row'); if (!r || IB.sel === r.dataset.k) return; IB.sel = r.dataset.k; $$('.ib-row.on').forEach(x => x.classList.remove('on')); r.classList.add('on'); drawReader(); };
   $('.ib-tools .chips').onclick = e => { const b = e.target.closest('[data-f]'); if (!b) return; IB.unread = b.dataset.f === 'unread'; $$('.ib-tools .chips button').forEach(x => x.classList.toggle('on', x === b)); refresh(true); };
   let qt; $('#ib-q').oninput = e => { IB.q = e.target.value; clearTimeout(qt); qt = setTimeout(() => refresh(true), 200); };
@@ -128,11 +132,11 @@ PAGES.inbox = async function (v) {
   // keyboard: J/K or arrows to move, U unread, Delete to delete
   document.onkeydown = e => {
     if (S.route !== 'inbox' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('.modal')) return;
-    const ms = IB.data.messages, i = ms.findIndex(m => m.account_id + ':' + m.uid === IB.sel);
-    const go = j => { const m = ms[j]; if (!m) return; IB.sel = m.account_id + ':' + m.uid; drawList(); drawReader(); const r = $(`.ib-row[data-k="${IB.sel}"]`); if (r) r.scrollIntoView({ block: 'nearest' }); };
+    const ms = IB.data.messages, i = ms.findIndex(m => ibKey(m) === IB.sel);
+    const go = j => { const m = ms[j]; if (!m) return; IB.sel = ibKey(m); drawList(); drawReader(); const r = $(`.ib-row[data-k="${CSS.escape(IB.sel)}"]`); if (r) r.scrollIntoView({ block: 'nearest' }); };
     if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); go(i + 1); }
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); go(Math.max(0, i - 1)); }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && IB.sel) { const [a, u] = IB.sel.split(':').map(Number); del(a, u); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && IB.sel) del(IB.sel);
     if (e.key === 'u' && IB.sel) $('[data-x="unread"]') && $('[data-x="unread"]').click();
   };
   // live: the app checks every 20s; this just notices when something changed

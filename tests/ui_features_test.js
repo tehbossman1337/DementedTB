@@ -9,7 +9,7 @@ const [, , APP, KEY, OUT] = process.argv; let fails = 0; const ok = (c, m) => { 
   ok((await p.textContent('#view')).includes('By email account'), 'stick page tables');
   await p.click('#sr-d [data-d="all"]'); await p.waitForTimeout(400); ok(await p.locator('#view table.t').count() >= 2, 'stick tables have rows');
   await p.screenshot({ path: OUT + '/stick.png', fullPage: true });
-  await p.click('[data-nav="attention"]'); await p.waitForSelector('#ru-add');
+  ok(await p.locator('[data-nav="attention"]').count() === 0, 'Needs attention not in the sidebar'); await p.click('[data-nav="email"]'); await p.click('#m-rules'); await p.waitForSelector('#ru-add');
   await p.click('[data-rule]'); await p.fill('#ru-r', 'Pokémon Center'); await p.selectOption('#ru-k', 'domain'); await p.click('#ru-s'); await p.waitForTimeout(600);
   ok((await p.textContent('#view')).includes('Anything from'), 'rule listed');
   await p.screenshot({ path: OUT + '/rules.png', fullPage: true });

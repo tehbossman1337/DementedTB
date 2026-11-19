@@ -101,7 +101,7 @@ const readText = f => new Promise((res, rej) => { const r = new FileReader(); r.
 /* ---------- state + shell */
 const S = { route: 'tracking', info: null, page: null, shell: null, tok: 0 };
 const NAV = [
-  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['attention', 'Needs attention', 'bell'], ['stick', 'Stick rates', 'chart'], ['inbox', 'Inbox', 'inbox'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
+  { id: 'tracker', label: 'Order Tracker', icon: 'truck', items: [['tracking', 'Tracking', 'box'], ['stick', 'Stick rates', 'chart'], ['inbox', 'Inbox', 'inbox'], ['email', 'Email accounts', 'mail'], ['webhooks', 'Discord webhooks', 'discord']] },
   { id: 'arsenal', label: 'Arsenal', icon: 'target', items: [['checkouts', 'Checkouts', 'doc'], ['servers', 'Servers & channels', 'discord'], ['bots', 'Bots & proxies', 'layers'], ['rules', 'Price rules', 'doc']] },
   { id: 'inv', label: 'Inventory', icon: 'archive', items: [['inv_dash', 'Dashboard', 'chart'], ['inv_items', 'Items', 'box'], ['inv_sales', 'Sales', 'tag'], ['inv_receipts', 'Receipts', 'receipt'], ['inv_scan', 'Scan station', 'scan'], ['inv_tax', 'Tax summary', 'doc'], ['inv_settings', 'Fees & settings', 'gear']] },
   { id: 'vault', label: 'Profiles & Accounts', icon: 'user', items: [['profiles', 'Profiles', 'card'], ['siteaccts', 'Accounts', 'key']] },

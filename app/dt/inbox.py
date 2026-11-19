@@ -509,7 +509,7 @@ def read_as_order(c, aid, uid):
     from . import parsers
     acct = _acct(c, aid)
     msg = email.message_from_bytes(_raw(acct, uid), policy=policy.default)
-    sender, subject = _dec(msg.get("From", "")), _dec(msg.get("Subject", ""))
+    sender, subject = parsers.unrelay(_dec(msg.get("From", ""))), _dec(msg.get("Subject", ""))
     body = mail.body_text(msg)
     forced = mail.rule_retailer(db.rows(c, "SELECT * FROM retailer_rules"), sender)
     ev, why = parsers.parse_email(sender, subject, body, msg.get("Date"), extra=f"{msg.get('Reply-To', '')}\n{subject}\n{body[:800]}", default=forced)

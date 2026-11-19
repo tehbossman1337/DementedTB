@@ -96,8 +96,23 @@ SAMPLES = [
      {"retailer": "Best Buy", "order_number": "BBY01-806123456789", "status": "delivered"}),
 ]
 
+# The same emails as they arrive at an iCloud Hide My Email address: Apple rewrites the sender so replies go through the relay.
+RELAYED = [
+    (_msg("Target <orders_at_oe_target_com_x7k2qzpd@icloud.com>", "Thanks for shopping with us! Here's your order #: 102003492819480.", _html("Thanks for shopping with us!", [
+        "<h1>Thanks for your order!</h1>", "Order #102003492819480", _item("Pokémon TCG: Mega Evolution Booster Bundle", 1, "29.99"), "Subtotal $29.99", "Total $32.39"]), T0),
+     {"retailer": "Target", "order_number": "102003492819480", "status": "placed", "total": 32.39}),
+    (_msg("Target <orders_at_oe_target_com_x7k2qzpd@icloud.com>", "Your order is on the way!", _html("On the way", ["Your package is on the way", "Order #102003492819480"]), T0 + 86400),
+     {"retailer": "Target", "order_number": "102003492819480", "status": "shipped"}),
+    (_msg('"Walmart.com" <help_at_walmart_com_ab12cd34@icloud.com>', "Delivered: Pokémon TCG Booster Bundle", _html("Delivered", ["Your package was delivered", "Order# 2000150-12345678"]), T0),
+     {"retailer": "Walmart", "order_number": "2000150-12345678", "status": "delivered"}),
+    (_msg("Best Buy <BestBuyInfo_at_emailinfo_bestbuy_com_9zz1q8@icloud.com>", "Your order has shipped", _html("Shipped", ["Your order has shipped", "Order #BBY01-806123456799"]), T0),
+     {"retailer": "Best Buy", "order_number": "BBY01-806123456799", "status": "shipped"}),
+]
+SAMPLES = SAMPLES + RELAYED
+
 # Marketing mail from the same retailers must not become orders or land in Needs attention.
 NEGATIVE = [
     _msg("Target <targetnews@em.target.com>", "Free shipping on your next order 🎉", _html("Deals!", ["Shop deals", "Order online, pick up today"]), T0),
     _msg("Best Buy <BestBuy@email.bestbuy.com>", "Order now: deals end tonight", _html("Deals", ["Top deals", "Shop now"]), T0),
+    _msg("Target <targetnews_at_em_target_com_q9w8e7@icloud.com>", "Free shipping on your next order", _html("Deals!", ["Shop deals"]), T0),
 ]

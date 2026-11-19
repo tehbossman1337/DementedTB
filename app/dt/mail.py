@@ -30,7 +30,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SKIP_FOLDERS = re.compile(r"(^|/)(drafts?|trash|deleted (messages|items)|junk|spam|sent( mail| items| messages)?|outbox|archive/trash)$|\[gmail\]/(drafts|trash|spam|sent mail|important|starred)", re.I)
 ORDER_WORDS = re.compile(r"order|ship|deliver|cancel|receipt|confirm|tracking|pick ?up|purchase|package|parcel|refund|invoice|payment|thank(s| you)|pre-?order|arriv|on (its|the) way|out for|expected|delay|label", re.I)
 RETAIL_SENDER = re.compile("|".join(re.escape(d) for ds in parsers.RETAILERS.values() for d in ds), re.I)
-PARSER_VERSION = 2  # bump when the order reader gets better: mail it skipped before is read again once
+PARSER_VERSION = 3  # bump when the order reader gets better: mail it skipped before is read again once
 
 
 def maybe_reparse():
@@ -262,7 +262,7 @@ def recipient(msg, mailbox):
 
 
 def process_message(c, mid, msg, mailbox, excs, own, announce=True):
-    sender = _dec(msg.get("From", ""))
+    sender = parsers.unrelay(_dec(msg.get("From", "")))  # Hide My Email relayed senders back to the store's real address
     subject = _dec(msg.get("Subject", ""))
     if orders.is_excepted(excs, sender, subject):
         c.execute("INSERT OR REPLACE INTO processed VALUES(?,?,?,?,?)", (mid, mailbox, "", "ignored (exception)", db.now()))
@@ -393,7 +393,7 @@ def sync_account(aid, full=False, progress=lambda m: None, announce=True):
                     if h is None:
                         continue
                     stats["seen"] += 1
-                    sender, subject = _dec(h.get("From", "")), _dec(h.get("Subject", ""))
+                    sender, subject = parsers.unrelay(_dec(h.get("From", ""))), _dec(h.get("Subject", ""))
                     mid = (h.get("Message-ID") or f"{acct['email']}:{folder}:{validity}:{u}").strip()
                     if mid in done and not full:
                         continue

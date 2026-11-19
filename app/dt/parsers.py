@@ -21,7 +21,7 @@ RETAILERS = {
     "Newegg": ["newegg.com"],
     "Micro Center": ["microcenter.com"],
 }
-BRANDS = {"Pokémon Center": ["pokemon center", "pokémon center", "pokemoncenter"], "Target": ["target.com", "target order"], "Walmart": ["walmart"],
+BRANDS = {"Pokémon Center": ["pokemon center", "pokémon center", "pokemoncenter"], "Target": ["target.com", "target order", "target brands, inc", "target circle"], "Walmart": ["walmart"],
           "Best Buy": ["best buy", "bestbuy"], "GameStop": ["gamestop"], "Costco": ["costco"], "Sam's Club": ["sam's club", "samsclub"],
           "Amazon": ["amazon"], "TCGplayer": ["tcgplayer"], "Newegg": ["newegg"], "Micro Center": ["micro center", "microcenter"]}
 RETAILER_COLORS = {"Pokémon Center": "#f5c400", "Target": "#e5304f", "Walmart": "#2f7de1", "Best Buy": "#f0d000", "GameStop": "#e11d48",
@@ -99,11 +99,37 @@ ITEM_B = re.compile(r"^\s*(.{6,120}?)\s+(?:qty|quantity)\s*[:x]?\s*(\d{1,3})\s+(
 ITEM_C = re.compile(r"^(.{6,120}?)\s{2,}(\d{1,3})\s{2,}\$\s*([\d,]+\.\d{2})(?:\s{2,}\$\s*[\d,]+\.\d{2})?\s*$")
 
 
+_RELAY = re.compile(r"([A-Za-z0-9.+%-]+(?:_[A-Za-z0-9.+%-]+)*?)_at_([A-Za-z0-9_-]+)_[A-Za-z0-9]{3,}@(?:icloud\.com|me\.com|privaterelay\.appleid\.com)", re.I)
+
+
+def unrelay(sender):
+    """iCloud Hide My Email rewrites the sender so replies go through Apple, e.g. Target <orders_at_oe_target_com_x7k2qz@icloud.com>.
+    Put the real address back (orders@oe.target.com) so the store can be recognised; anything else is returned unchanged."""
+    if not sender or "_at_" not in sender:
+        return sender
+    def fix(m):
+        return f"{m.group(1)}@{m.group(2).replace('_', '.')}"
+    return _RELAY.sub(fix, sender)
+
+
+def _display_name(sender):
+    from email.utils import parseaddr
+    return re.sub(r"[^a-z0-9' ]+", " ", parseaddr(sender or "")[0].lower()).strip()
+
+
+NAME_ALIASES = {"target": "Target", "target com": "Target", "target orders": "Target", "walmart": "Walmart", "walmart com": "Walmart",
+                "best buy": "Best Buy", "my best buy": "Best Buy", "bestbuy": "Best Buy", "pok mon center": "Pokémon Center", "pokemon center": "Pokémon Center"}
+
+
 def detect_retailer(sender, extra="", default=None):
+    sender = unrelay(sender)
     s = (sender or "").lower()
     for name, doms in RETAILERS.items():
         if any(d in s for d in doms):
             return name
+    nm = _display_name(sender)  # the sender's name ("Target") when the address is relayed or unusual
+    if nm in NAME_ALIASES:
+        return NAME_ALIASES[nm]
     e = (extra or "").lower()
     for name, doms in RETAILERS.items():
         if any(d in e for d in doms):
@@ -209,7 +235,7 @@ def parse_email(sender, subject, body, date_header=None, extra="", default=None)
     if not retailer:
         return None, "unknown retailer"
     prof = PROFILES.get(retailer, {})
-    if prof.get("skip_sender") and re.search(prof["skip_sender"], fwd_from or sender or "", re.I):
+    if prof.get("skip_sender") and re.search(prof["skip_sender"], unrelay(fwd_from or sender or ""), re.I):
         return None, "marketing email"
     if NOT_ORDER_SUBJECT.search(fwd_subj or subject or ""):
         return None, "not an order email"

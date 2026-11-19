@@ -30,7 +30,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SKIP_FOLDERS = re.compile(r"(^|/)(drafts?|trash|deleted (messages|items)|junk|spam|sent( mail| items| messages)?|outbox|archive/trash)$|\[gmail\]/(drafts|trash|spam|sent mail|important|starred)", re.I)
 ORDER_WORDS = re.compile(r"order|ship|deliver|cancel|receipt|confirm|tracking|pick ?up|purchase|package|parcel|refund|invoice|payment|thank(s| you)|pre-?order|arriv|on (its|the) way|out for|expected|delay|label", re.I)
 RETAIL_SENDER = re.compile("|".join(re.escape(d) for ds in parsers.RETAILERS.values() for d in ds), re.I)
-PARSER_VERSION = 3  # bump when the order reader gets better: mail it skipped before is read again once
+PARSER_VERSION = 4  # bump when the order reader gets better: mail it skipped before is read again once
 
 
 def maybe_reparse():
@@ -295,8 +295,13 @@ def _folders(M, acct):
     typ, data = M.list()
     names = []
     for raw in data or []:
+        if isinstance(raw, tuple):  # a name sent as a literal: (b'(\\HasNoChildren) "/" {12}', b'Target Order')
+            flags, name = raw[0].decode("utf-8", "replace"), raw[1].decode("utf-8", "replace")
+            if "\\Noselect" not in flags and not SKIP_FOLDERS.search(name):
+                names.append(name)
+            continue
         s = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
-        if "\\Noselect" in s:
+        if "\\Noselect" in s or "\\NoSelect" in s:
             continue
         m = re.search(r'"([^"]*)"\s*$', s) or re.search(r"\s(\S+)\s*$", s)
         if m and not SKIP_FOLDERS.search(m.group(1)):
@@ -494,9 +499,11 @@ def sync_all(full=False, account_id=None, announce=True):
 
 # ------------------------------------------------------------------ live watcher
 def _watch(aid, stop):
-    """One thread per inbox: keeps its own connection and checks UIDNEXT every few seconds; new mail syncs at once."""
+    """One thread per inbox: keeps its own connection and checks UIDNEXT of every folder (INBOX and the folders your mail rules file
+    orders into) every few seconds; new mail in any of them syncs at once."""
     M = None
     last_full = 0
+    folders, folders_at = [], 0
     st = LIVE["accounts"].setdefault(aid, {"live": False, "uidnext": None})
     while not stop.is_set():
         try:
@@ -509,8 +516,17 @@ def _watch(aid, stop):
             try:
                 if M is None:
                     M = login(a)
-                typ, data = M.status("INBOX", "(UIDNEXT)")
-                nxt = re.search(rb"UIDNEXT (\d+)", data[0]).group(1) if data and data[0] else None
+                if not folders or time.time() - folders_at > 600:  # pick up folders you add or rename
+                    folders, folders_at = _folders(M, a), time.time()
+                sig = []
+                for f in folders:
+                    try:
+                        typ, data = M.status('"' + f.replace('"', '\\"') + '"', "(UIDNEXT)")
+                        mm = re.search(rb"UIDNEXT (\d+)", data[0]) if typ == "OK" and data and data[0] else None
+                        sig.append((f, mm.group(1) if mm else None))
+                    except imaplib.IMAP4.error:
+                        sig.append((f, None))
+                nxt = tuple(sig)
                 st["live"] = True
                 changed = st["uidnext"] is not None and nxt != st["uidnext"]
                 st["uidnext"] = nxt

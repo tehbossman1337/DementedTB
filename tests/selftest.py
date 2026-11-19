@@ -596,5 +596,15 @@ _c6.execute("INSERT OR REPLACE INTO processed VALUES('<old-skip>','me','','not a
 check("reader upgrade re-reads skipped mail once", _ml2.maybe_reparse() and not _c6.execute("SELECT 1 FROM processed WHERE message_id='<old-skip>'").fetchone()
       and _d3.get(_c6, "wm:1:INBOX:7", "") == "" and not _ml2.maybe_reparse())
 
+# orders filed into folders by mail rules (Target, Retailers/Walmart, …) are read too
+_F.BOXES.clear()
+for _m, _w in _RS.SAMPLES[:3] + _RS.RELAYED[:1]:
+    _F.add(_m.as_bytes(), {"Walmart": "Retailers/Walmart", "Target": "Target"}.get(_w["retailer"], "INBOX"))
+_c7 = _d3.connect(); _c7.execute("UPDATE mail_accounts SET enabled=0"); _c7.commit()
+_aid7 = _c7.execute("INSERT INTO mail_accounts(email,provider,host,port,password,enabled,created_at) VALUES('folders@icloud.com','icloud','x',993,'pw',1,'x')").lastrowid; _c7.commit()
+_st7 = _ml2.sync_account(_aid7, announce=False)
+check("orders in rule folders are found", _c7.execute("SELECT 1 FROM orders WHERE order_number='102003492819480'").fetchone() is not None
+      and _c7.execute("SELECT 1 FROM orders WHERE order_number='2000140-27154038'").fetchone() is not None, _st7)
+
 print(f"{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
